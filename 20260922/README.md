@@ -1,0 +1,1 @@
+"Runtest2_stdlib.py"在手机上运行，通过局域网成功调用笔记本电脑上ollama运行的qwen3:0.6b。
