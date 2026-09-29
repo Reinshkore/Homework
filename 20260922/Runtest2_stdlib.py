@@ -11,7 +11,8 @@
 import json
 import urllib.request
 
-BASE = "http://10.201.17.177:11434"     # 不要带 /v1，本脚本走原生接口
+BASE = "http://10.201.208.97:11434"      # 不要带 /v1，本脚本走原生接口
+                                         # 该 IP 由路由器 DHCP 动态分配，连接失败时先在笔记本上执行 ipconfig 查当前 WLAN 的 IPv4 地址并更新这里
 MODEL = "qwen3:0.6b"
 THINK = False                            # False 关闭思维链；True 或 "low"/"medium"/"high" 开启
 TIMEOUT = 300                            # 首次调用要加载模型，留足时间
