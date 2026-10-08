@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>转置小助手</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --green:#EAF3DE; --amber:#FAEEDA; --red:#FCEBEB; --edited:#E6F1FB;
+    --green-t:#3B6D11; --amber-t:#854F0B; --red-t:#A32D2D; --edited-t:#0C447C;
+    --border:#d9d9d4; --muted:#6b6b66;
+  }
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;margin:0;background:#f4f4f0;color:#26261f;font-size:13px}
+  .wrap{max-width:1280px;margin:0 auto;padding:16px}
+  h1{font-size:16px;font-weight:600;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 12px;font-size:12px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+  select,button{font:inherit;padding:5px 10px;border:1px solid #b9b9b2;border-radius:7px;background:#fff;cursor:pointer}
+  button.primary{background:#185FA5;color:#fff;border-color:#185FA5}
+  button:disabled{opacity:.5;cursor:default}
+  .badge{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--border);background:#fff;color:#444}
+  .banner{display:none;background:var(--red);color:var(--red-t);border:1px solid #e6b8b8;border-radius:8px;padding:8px 12px;margin-bottom:12px}
+  .cols{display:grid;grid-template-columns:minmax(320px,5fr) minmax(480px,7fr);gap:12px;align-items:start}
+  .panel{background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px}
+  .panel h2{font-size:13px;font-weight:600;margin:0 0 8px;color:#444}
+  pre.raw{white-space:pre-wrap;word-break:break-all;margin:0;max-height:560px;overflow:auto;line-height:1.7;font-family:inherit}
+  pre.raw mark{background:#fdf2c9;border-bottom:1px solid #d9c26a;border-radius:2px;padding:0 1px}
+  table{border-collapse:collapse;width:100%;table-layout:fixed}
+  #table{overflow-x:auto}
+  #table table{min-width:880px}
+  .st{white-space:nowrap}
+  th,td{border:1px solid #e2e2dc;padding:4px 6px;text-align:left;vertical-align:top}
+  th{background:#f6f6f2;font-weight:600;font-size:12px}
+  td input{width:100%;border:none;background:transparent;font:inherit;padding:2px 3px;border-radius:4px;color:inherit}
+  td input:focus{outline:2px solid #9cc3ea;background:#fff}
+  .lv-green{background:var(--green);color:var(--green-t)}
+  .lv-amber{background:var(--amber);color:var(--amber-t)}
+  .lv-red{background:var(--red);color:var(--red-t)}
+  .lv-edited{background:var(--edited);color:var(--edited-t)}
+  .derived{color:var(--muted)}
+  .st{font-size:12px;font-weight:600;padding:1px 8px;border-radius:99px;display:inline-block}
+  .st-ok{background:var(--green);color:var(--green-t)}
+  .st-warning{background:var(--amber);color:var(--amber-t)}
+  .st-error{background:var(--red);color:var(--red-t)}
+  .issues{margin-top:12px}
+  .issues .item{display:flex;gap:8px;padding:6px 10px;border-radius:7px;margin-bottom:6px;cursor:pointer;align-items:baseline}
+  .issues .item:hover{filter:brightness(.97)}
+  .issues .item.error{background:var(--red);color:var(--red-t)}
+  .issues .item.warning{background:var(--amber);color:var(--amber-t)}
+  .issues .lv{font-size:11px;font-weight:700;border:1px solid currentColor;border-radius:4px;padding:0 4px;flex:none}
+  .foot{color:var(--muted);font-size:12px;margin-top:12px;line-height:1.7}
+  .empty{color:var(--muted);padding:24px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>转置小助手 · 入离职信息自动转置</h1>
+  <p class="sub">邮件正文与附件 → 标准报岗表 · 规则优先、模型补充 · 双重校验 + 人工复核闭环（演示数据全部为合成样本）</p>
+
+  <div class="bar">
+    <label>客户模板 <select id="sel-tpl"></select></label>
+    <label>邮件样本 <select id="sel-sample"></select></label>
+    <button class="primary" id="btn-go">转 置</button>
+    <button id="btn-revalidate" disabled>重新校验</button>
+    <button id="btn-export" disabled>导出报岗表</button>
+    <span class="badge" id="mode-badge">未开始</span>
+  </div>
+
+  <div class="banner" id="degradation"></div>
+
+  <div class="cols">
+    <div class="panel">
+      <h2>原始邮件 · 正文 + 附件文本</h2>
+      <pre class="raw" id="raw"><span class="empty">选择样本后点击「转置」</span></pre>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>标准报岗表 · 可编辑（黄=待复核 红=强制人工 蓝=人工已确认）</h2>
+        <div id="table" class="empty">暂无结果</div>
+        <div class="issues"><h2 style="margin-top:4px">复核清单</h2><div id="issues"><span class="empty">暂无</span></div></div>
+      </div>
+      <p class="foot" id="assump"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let BOOT = null, RESULT = null, WORK = [];
+
+const MODE_TEXT = {llm_live:"抽取来源：实时 LLM", llm_cache:"抽取来源：缓存回放（LLM 生成）", offline:"抽取来源：离线模式（规则兜底，置信度封顶 0.75）"};
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+async function boot(){
+  BOOT = await (await fetch("/api/bootstrap")).json();
+  $("sel-tpl").innerHTML = BOOT.templates.map(t=>`<option value="${t.customer_id}">${esc(t.customer_name)}</option>`).join("");
+  $("sel-sample").innerHTML = BOOT.samples.map(s=>`<option value="${s.sample_id}">${s.sample_id} · ${esc(s.desc)}</option>`).join("");
+  $("assump").innerHTML = "口径假设：" + esc(BOOT.assumptions.notes.join("；")) +
+    `（社保基数区间 ${BOOT.assumptions.base_range.join("–")}，生效日期窗口 ${BOOT.assumptions.effective_date_window.join(" ~ ")}）` +
+    (BOOT.llm_available ? ` · LLM 已接入（${esc(BOOT.llm_model)}）` : " · 未配置 LLM key，当前为离线规则模式（在 transposer/.env 中填写 TRANSPOSER_API_KEY 后刷新缓存即可启用）");
+}
+
+async function transpose(){
+  const tpl = $("sel-tpl").value, sid = $("sel-sample").value;
+  $("btn-go").disabled = true; $("btn-go").textContent = "转置中…";
+  try{
+    RESULT = await (await fetch("/api/transpose",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_id:tpl,sample_id:sid})})).json();
+    WORK = RESULT.records.map(r=>({key:r.key, fields:JSON.parse(JSON.stringify(r.fields)), edited:[], issues:r.issues||[], extra_issues:r.extra_issues||[]}));
+    renderAll();
+  }finally{
+    $("btn-go").disabled = false; $("btn-go").textContent = "转 置";
+    $("btn-revalidate").disabled = false; $("btn-export").disabled = false;
+  }
+}
+
+function renderAll(){
+  $("mode-badge").textContent = MODE_TEXT[RESULT.mode] || RESULT.mode;
+  const d = $("degradation");
+  if(RESULT.degradation){ d.style.display="block"; d.textContent = "⚠ 降级路径：" + RESULT.degradation; }
+  else d.style.display="none";
+  renderRaw(); renderTable(); renderIssues();
+}
+
+function renderRaw(){
+  let html = esc(RESULT.raw_text);
+  const needles = new Set();
+  WORK.forEach(r=>Object.values(r.fields).forEach(f=>{
+    if(f.raw && f.raw.length>=3) needles.add(f.raw);
+    if(f.value && String(f.value).length>=3) needles.add(String(f.value));
+  }));
+  [...needles].sort((a,b)=>b.length-a.length).forEach(n=>{
+    const en = esc(n);
+    html = html.split(en).join(`<mark>${en}</mark>`);
+  });
+  $("raw").innerHTML = html;
+}
+
+function renderTable(){
+  if(!WORK.length){ $("table").innerHTML = `<div class="empty">未抽取到记录</div>`; return; }
+  const cols = BOOT.fields.map(f=>f.key), labels = BOOT.fields.map(f=>f.label);
+  const widths = ["7%","19%","12%","7%","9%","11%","14%","10%","11%"];
+  let h = `<table><colgroup>${widths.map(w=>`<col style="width:${w}">`).join("")}</colgroup><tr>${labels.map(l=>`<th>${esc(l)}</th>`).join("")}<th>${esc(BOOT.derived[0].label)}</th><th style="width:72px">状态</th></tr>`;
+  WORK.forEach((r,ri)=>{
+    const worst = ["error","warning"].find(lv=>r.issues.some(i=>i.level===lv)) || "ok";
+    h += `<tr>`;
+    cols.forEach(fk=>{
+      const f = r.fields[fk]||{};
+      const cls = r.edited.includes(fk) ? "lv-edited" : (f.level ? "lv-"+f.level : "");
+      const tip = `${f.edited?"人工确认":"来源:"+(f.source||"—")+"｜置信:"+(f.score??"—")+"（"+((f.reasons||[]).join("、"))+"）"}${f.raw?"｜原文:"+f.raw:""}`;
+      h += `<td class="${cls}"><input data-r="${ri}" data-f="${fk}" value="${esc(f.value||"")}" title="${esc(tip)}" placeholder="${f.level==="red"?"必填/强制人工":""}"></td>`;
+    });
+    const der = (r.fields.effective_date&&r.fields.effective_date.value) ? String(r.fields.effective_date.value).slice(0,7) : "";
+    h += `<td class="derived">${esc(der)}</td><td><span class="st st-${worst==="ok"?"ok":worst}">${worst==="ok"?"正常":worst==="warning"?"待复核":"强制人工"}</span></td></tr>`;
+  });
+  $("table").innerHTML = h + `</table>`;
+  $("table").querySelectorAll("input").forEach(inp=>{
+    inp.addEventListener("change",()=>{
+      const ri=+inp.dataset.r, fk=inp.dataset.f;
+      WORK[ri].fields[fk].value = inp.value;
+      if(!WORK[ri].edited.includes(fk)) WORK[ri].edited.push(fk);
+      inp.className = "";
+      inp.parentElement.className = "lv-edited";
+    });
+  });
+}
+
+function renderIssues(){
+  const items = [];
+  WORK.forEach((r,ri)=>(r.issues||[]).forEach(i=>items.push({...i, ri})));
+  if(!items.length){ $("issues").innerHTML = `<span class="empty">无待复核项</span>`; return; }
+  $("issues").innerHTML = items.map((i,ix)=>`
+    <div class="item ${i.level}" data-ri="${i.ri}" data-f="${i.field}">
+      <span class="lv">${i.level==="error"?"错":"警"}</span>
+      <span><b>${esc(WORK[i.ri].fields.name?.value||WORK[i.ri].key||("记录"+(i.ri+1)))}</b> · ${esc(BOOT.labels[i.field]||i.field)} — ${esc(i.message)}</span>
+    </div>`).join("");
+  $("issues").querySelectorAll(".item").forEach(el=>{
+    el.addEventListener("click",()=>{
+      const inp = $("table").querySelector(`input[data-r="${el.dataset.ri}"][data-f="${el.dataset.f}"]`);
+      if(inp){ inp.focus(); inp.select(); }
+    });
+  });
+}
+
+async function revalidate(){
+  const payload = {mode:RESULT.mode, records:WORK.map(r=>({key:r.key, fields:r.fields, edited:r.edited, extra_issues:r.extra_issues}))};
+  const resp = await (await fetch("/api/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})).json();
+  resp.records.forEach((nr,ri)=>{
+    WORK[ri].fields = nr.fields; WORK[ri].extra_issues = nr.extra_issues; WORK[ri].issues = nr.issues;
+  });
+  renderTable(); renderIssues();
+}
+
+async function doExport(){
+  const payload = {
+    template_name: (BOOT.templates.find(t=>t.customer_id===RESULT.template_id)||{}).customer_name || "客户",
+    sample_id: RESULT.sample_id, mode: RESULT.mode,
+    records: WORK.map(r=>({key:r.key, fields:r.fields, edited:r.edited, extra_issues:r.extra_issues})),
+  };
+  const resp = await fetch("/api/export",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  const blob = await resp.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `报岗表-${RESULT.sample_id}.xlsx`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+$("btn-go").addEventListener("click", transpose);
+$("btn-revalidate").addEventListener("click", revalidate);
+$("btn-export").addEventListener("click", doExport);
+boot();
+</script>
+</body>
+</html>

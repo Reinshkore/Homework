@@ -1,0 +1,24 @@
+{
+  "customer_id": "CUST_B",
+  "customer_name": "示例客户B（自然语言叙述型）",
+  "aliases": {
+    "name": ["姓名"],
+    "id_no": ["身份证", "证件号码"],
+    "position": ["岗位"],
+    "region": ["工作地"],
+    "base": ["社保基数"],
+    "move_type": ["类型"],
+    "effective_date": ["生效日期", "入职日期", "离职日期"]
+  },
+  "text_chunk": "blank",
+  "text_patterns": [
+    {"field": "name", "re": "(?P<v>[\\u4e00-\\u9fa5]{2,4})（身份证"},
+    {"field": "id_no", "re": "身份证\\s*(?:号码)?\\s*(?P<v>[0-9]{17}[0-9Xx])"},
+    {"field": "position", "re": "岗位(?P<v>[\\u4e00-\\u9fa5]{2,10})"},
+    {"field": "region", "re": "工作地(?P<v>[\\u4e00-\\u9fa5]{2,6})"},
+    {"field": "move_type", "re": "(?<![入离])(?P<v>入职|离职)"},
+    {"field": "effective_date", "re": "自\\s*(?P<v>[0-9]{4}年[0-9]{1,2}月[0-9]{1,2}日)"},
+    {"field": "base", "re": "社保基数\\s*(?:按|为)?\\s*(?P<v>[0-9]{4,6})"}
+  ],
+  "notes": "正文为叙述段落；日期格式 YYYY年M月D日；字段名用简称"
+}

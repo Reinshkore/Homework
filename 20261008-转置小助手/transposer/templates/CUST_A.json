@@ -1,0 +1,19 @@
+{
+  "customer_id": "CUST_A",
+  "customer_name": "示例客户A（表格附件型）",
+  "aliases": {
+    "name": ["员工姓名", "姓名"],
+    "id_no": ["证件号码", "证件号", "身份证号码"],
+    "position": ["职位", "岗位"],
+    "region": ["工作城市", "工作地", "地区"],
+    "base": ["社保缴纳基数", "社保基数", "缴纳基数"],
+    "move_type": ["类型", "入离职类型"],
+    "effective_date": ["生效日期", "入职日期", "离职日期"]
+  },
+  "text_chunk": "blank",
+  "text_patterns": [
+    {"field": "name", "re": "(?P<v>[\\u4e00-\\u9fa5]{2,3})(?=（(?:入职|离职)）)"},
+    {"field": "move_type", "re": "（(?P<v>入职|离职)）"}
+  ],
+  "notes": "附件为 xlsx 表格；日期格式 YYYY/MM/DD；字段名用全称"
+}

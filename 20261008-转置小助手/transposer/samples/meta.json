@@ -1,0 +1,86 @@
+[
+  {
+    "sample_id": "A-01",
+    "template_id": "CUST_A",
+    "dir": "A-01",
+    "desc": "客户A · xlsx 表格 · 3 条正常记录",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "名单.xlsx"
+      ]
+    }
+  },
+  {
+    "sample_id": "A-02",
+    "template_id": "CUST_A",
+    "dir": "A-02",
+    "desc": "客户A · xlsx · 埋错：证件校验位 / 日期非法 / 必填缺失 + 枚举非法",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "名单.xlsx"
+      ]
+    }
+  },
+  {
+    "sample_id": "B-01",
+    "template_id": "CUST_B",
+    "dir": "B-01",
+    "desc": "客户B · docx 叙述 · 2 条正常记录",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "通知.docx"
+      ]
+    }
+  },
+  {
+    "sample_id": "B-02",
+    "template_id": "CUST_B",
+    "dir": "B-02",
+    "desc": "客户B · docx · 埋错：生效日期 13 月 / 入职缺社保基数",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "通知.docx"
+      ]
+    }
+  },
+  {
+    "sample_id": "C-01",
+    "template_id": "CUST_C",
+    "dir": "C-01",
+    "desc": "客户C · PDF 表单 · 2 条正常记录",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "通知.pdf"
+      ]
+    }
+  },
+  {
+    "sample_id": "C-02",
+    "template_id": "CUST_C",
+    "dir": "C-02",
+    "desc": "客户C · PDF · 埋错：社保基数跨源冲突 / 未满 16 周岁",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "通知.pdf"
+      ]
+    }
+  },
+  {
+    "sample_id": "S-01",
+    "template_id": "CUST_A",
+    "dir": "S-01",
+    "desc": "扫描件 · 无文字层 · 降级路径演示",
+    "files": {
+      "body": "body.txt",
+      "attachments": [
+        "扫描件.pdf"
+      ]
+    }
+  }
+]

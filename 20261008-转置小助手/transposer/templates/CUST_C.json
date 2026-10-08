@@ -1,0 +1,26 @@
+{
+  "customer_id": "CUST_C",
+  "customer_name": "示例客户C（PDF 表单型）",
+  "aliases": {
+    "name": ["姓名"],
+    "id_no": ["证件号码"],
+    "position": ["岗位"],
+    "region": ["工作地"],
+    "base": ["社保基数"],
+    "move_type": ["类型"],
+    "effective_date": ["生效日期"]
+  },
+  "text_chunk": "marker",
+  "chunk_marker": "^【",
+  "text_patterns": [
+    {"field": "name", "re": "姓名[:：]\\s*(?P<v>[\\u4e00-\\u9fa5]{2,4})"},
+    {"field": "id_no", "re": "证件号码[:：]\\s*(?P<v>[0-9]{17}[0-9Xx])"},
+    {"field": "position", "re": "岗位[:：]\\s*(?P<v>[\\u4e00-\\u9fa5]{2,10})"},
+    {"field": "region", "re": "工作地[:：]\\s*(?P<v>[\\u4e00-\\u9fa5]{2,6})"},
+    {"field": "move_type", "re": "类型[:：]\\s*(?P<v>入职|离职)"},
+    {"field": "effective_date", "re": "生效日期[:：]\\s*(?P<v>[0-9]{4}-[0-9]{1,2}-[0-9]{1,2})"},
+    {"field": "base", "re": "社保基数[^0-9]{0,8}?(?P<v>[0-9]{4,6})"},
+    {"field": "name", "re": "(?<![\\u4e00-\\u9fa5])(?P<v>[\\u4e00-\\u9fa5]{2,3}?)(?:的)?社保基数"}
+  ],
+  "notes": "附件为 PDF 表单；日期格式 YYYY-MM-DD；社保基数可能在邮件正文备注中出现（跨源）"
+}

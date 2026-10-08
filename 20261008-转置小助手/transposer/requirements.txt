@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+openpyxl
+python-docx
+pdfplumber
+httpx
+reportlab
+pytest
