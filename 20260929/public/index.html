@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>百炼 Managed Agents 本地网页示例</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef;
+    --muted:#8b93a7; --accent:#4f8cff; --user:#243447;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; height:100vh; display:flex; flex-direction:column;
+    font-family: system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:var(--bg); color:var(--text);
+  }
+  header { padding:13px 18px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  #meta { font-size:12px; color:var(--muted); }
+  #banner { padding:10px 18px; background:#3a2416; color:#ffcb8b; font-size:13px; border-bottom:1px solid var(--line); }
+  #banner:empty { display:none; }
+  #log { flex:1; display:flex; flex-direction:column; gap:12px; padding:18px; overflow-y:auto; }
+  .msg {
+    max-width:min(760px, 82%); padding:10px 14px; border-radius:10px;
+    white-space:pre-wrap; word-break:break-word; line-height:1.65; font-size:14px;
+    border:1px solid var(--line);
+  }
+  .user { align-self:flex-end; background:var(--user); border-color:transparent; }
+  .assistant { align-self:flex-start; background:var(--panel); }
+  .info { align-self:flex-start; background:transparent; border-style:dashed; color:var(--muted); font-size:12px; padding:6px 12px; }
+  .error { align-self:flex-start; background:#3a1b1b; color:#ff9d9d; }
+  .cursor::after { content:"▋"; margin-left:1px; color:var(--accent); animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  footer { border-top:1px solid var(--line); padding:12px 18px; display:flex; gap:10px; }
+  input {
+    flex:1; padding:11px 14px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:14px; outline:none;
+  }
+  input:focus { border-color:var(--accent); }
+  button { padding:11px 20px; border-radius:10px; border:none; background:var(--accent); color:#fff; font-size:14px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>百炼 Managed Agents · 本地网页示例</h1>
+    <span id="meta"></span>
+  </header>
+  <div id="banner"></div>
+  <div id="log"></div>
+  <footer>
+    <input id="q" placeholder="输入消息，回车发送" autocomplete="off" />
+    <button id="send">发送</button>
+  </footer>
+
+<script>
+const log = document.getElementById('log');
+const input = document.getElementById('q');
+const sendBtn = document.getElementById('send');
+const meta = document.getElementById('meta');
+const banner = document.getElementById('banner');
+
+let busy = false;
+
+function addMsg(cls, text = '') {
+  const el = document.createElement('div');
+  el.className = 'msg ' + cls;
+  el.textContent = text;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+function toBottom() { log.scrollTop = log.scrollHeight; }
+
+// 启动时检查后端配置是否齐全
+fetch('/api/meta')
+  .then((r) => r.json())
+  .then((m) => {
+    meta.textContent = m.sessionId ? `会话：${m.sessionId}` : '';
+    const miss = [];
+    if (!m.hasKey) miss.push('DASHSCOPE_API_KEY');
+    if (!m.hasWorkspace) miss.push('BAILIAN_WORKSPACE_ID');
+    if (!m.sessionId) miss.push('BAILIAN_SESSION_ID');
+    if (miss.length) banner.textContent = `缺少配置：${miss.join('、')}。请在 .env 中填写后重启服务。`;
+  })
+  .catch(() => {});
+
+function setBusy(v) {
+  busy = v;
+  sendBtn.disabled = v;
+  input.disabled = v;
+  if (!v) input.focus();
+}
+
+async function ask() {
+  const prompt = input.value.trim();
+  if (!prompt || busy) return;
+  input.value = '';
+  setBusy(true);
+
+  addMsg('user', prompt);
+  const answer = addMsg('assistant cursor');
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+
+    if (!resp.ok || !resp.body) {
+      let msg = `HTTP ${resp.status}`;
+      try { msg = (await resp.json()).message || msg; } catch {}
+      answer.classList.remove('cursor');
+      answer.classList.add('error');
+      answer.textContent = msg;
+      return;
+    }
+
+    // 读取后端 SSE，逐块渲染
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      let i;
+      while ((i = buf.indexOf('\n\n')) !== -1) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+
+        const line = block.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(5).trimStart()); } catch { continue; }
+
+        if (ev.type === 'delta') {
+          answer.textContent += ev.text;
+          toBottom();
+        } else if (ev.type === 'info') {
+          addMsg('info', ev.text);
+        } else if (ev.type === 'error') {
+          addMsg('error', ev.message);
+        } else if (ev.type === 'status' && ev.stop_reason?.type === 'requires_action') {
+          addMsg('info', '本次需要人工审批工具调用，本示例未实现审批交互。');
+        }
+      }
+    }
+  } catch (err) {
+    answer.classList.add('error');
+    answer.textContent = String(err);
+  } finally {
+    answer.classList.remove('cursor');
+    setBusy(false);
+  }
+}
+
+sendBtn.onclick = ask;
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) ask();
+});
+window.addEventListener('load', () => input.focus());
+</script>
+</body>
+</html>
