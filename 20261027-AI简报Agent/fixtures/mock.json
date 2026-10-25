@@ -1,0 +1,6 @@
+{
+  "note": "离线演示快照。M6 时把一次真实可用的检索结果存到这里（结构同 web_search 的 hits），SEARCH_PROVIDER=mock 即可在断网时走通主路径。当前为空，mock 模式会直接报错——不要用编造的数据充数。",
+  "taken_at": null,
+  "window": {"start": null, "end": null},
+  "hits": []
+}

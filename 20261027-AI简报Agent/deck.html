@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 行业简报 Agent · 构建说明</title>
+<style>
+  :root{
+    --ink:#16181d; --ink-2:#39404b; --muted:#69707d; --line:#e2e5ea;
+    --bg:#fbfbfc; --panel:#ffffff; --soft:#f4f6f8;
+    --accent:#1a5fd0; --accent-soft:#eef3fc;
+    --inherit:#6b7280; --rework:#b45309; --added:#0f766e;
+    --fs:17px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Inter","Segoe UI",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:var(--fs); line-height:1.72; -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- 进度条 ---------- */
+  #bar{position:fixed;top:0;left:0;height:2px;background:var(--accent);width:0;z-index:50;transition:width .1s linear}
+
+  /* ---------- 左侧目录 ---------- */
+  .toc{
+    position:fixed; top:0; left:0; width:264px; height:100vh;
+    padding:34px 22px 22px; border-right:1px solid var(--line);
+    background:var(--panel); display:flex; flex-direction:column; gap:18px;
+    overflow-y:auto;
+  }
+  .toc .brand{font-size:14px; font-weight:700; letter-spacing:.04em; color:var(--ink)}
+  .toc .brand span{display:block; font-weight:400; color:var(--muted); font-size:12px; margin-top:4px; letter-spacing:0}
+  .toc nav{display:flex; flex-direction:column; gap:1px}
+  .toc a{
+    display:flex; gap:9px; align-items:baseline;
+    padding:7px 10px; border-radius:7px; text-decoration:none;
+    color:var(--ink-2); font-size:13.5px; line-height:1.4;
+    border-left:2px solid transparent;
+  }
+  .toc a b{font-weight:600; color:var(--muted); font-size:12px; min-width:26px}
+  .toc a:hover{background:var(--soft)}
+  .toc a.on{background:var(--accent-soft); color:var(--accent); border-left-color:var(--accent)}
+  .toc a.on b{color:var(--accent)}
+  .toc .keys{margin-top:auto; font-size:11.5px; color:var(--muted); line-height:1.9; border-top:1px solid var(--line); padding-top:14px}
+  .toc kbd{
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;
+    background:var(--soft); border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:4px; padding:0 4px;
+  }
+
+  /* ---------- 正文 ---------- */
+  main{margin-left:264px}
+  .wrap{max-width:1000px; margin:0 auto; padding:0 46px}
+
+  header.cover{padding:96px 0 44px; border-bottom:1px solid var(--line)}
+  header.cover .eyebrow{font-size:12.5px; letter-spacing:.18em; color:var(--muted); text-transform:uppercase}
+  header.cover h1{font-size:40px; line-height:1.24; margin:16px 0 14px; letter-spacing:-.5px}
+  header.cover p{font-size:19px; color:var(--ink-2); margin:0; max-width:720px}
+  header.cover .meta{margin-top:26px; font-size:13px; color:var(--muted); display:flex; gap:22px; flex-wrap:wrap}
+
+  section{padding:64px 0; border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:0}
+  .head{display:flex; gap:16px; align-items:baseline; margin-bottom:26px}
+  .num{
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; color:var(--accent);
+    background:var(--accent-soft); border-radius:6px; padding:3px 8px; white-space:nowrap;
+  }
+  h2{font-size:28px; line-height:1.3; margin:0; letter-spacing:-.3px}
+  .lede{font-size:18px; color:var(--ink-2); margin:0 0 28px; max-width:760px}
+  h3{font-size:16px; margin:34px 0 12px; letter-spacing:.01em}
+  h3:first-child{margin-top:0}
+  p{margin:0 0 14px; max-width:800px}
+  ul,ol{margin:0 0 16px; padding-left:22px; max-width:800px}
+  li{margin:5px 0}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.9em; background:var(--soft);
+       border:1px solid var(--line); border-radius:4px; padding:.5px 5px; color:var(--ink-2); white-space:nowrap}
+  strong{font-weight:650}
+  .dim{color:var(--muted)}
+
+  /* ---------- 组件 ---------- */
+  .big{font-size:26px; line-height:1.5; font-weight:600; letter-spacing:-.2px; margin:0 0 22px; max-width:820px}
+  .big em{font-style:normal; color:var(--accent)}
+
+  .grid{display:grid; gap:14px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+
+  .card{border:1px solid var(--line); border-radius:11px; padding:18px 18px 16px; background:var(--panel)}
+  .card h4{margin:0 0 6px; font-size:15px}
+  .card p{margin:0; font-size:14.5px; color:var(--ink-2); line-height:1.66}
+
+  .quote{border-left:3px solid var(--accent); background:var(--accent-soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:0 0 20px; font-size:15.5px}
+  .quote p:last-child{margin-bottom:0}
+
+  .warn{border-left:3px solid var(--rework); background:#fdf7ed; padding:12px 16px; border-radius:0 8px 8px 0; margin:18px 0}
+  .warn p:last-child{margin-bottom:0}
+
+  table{width:100%; border-collapse:collapse; margin:8px 0 22px; font-size:14.5px}
+  th{text-align:left; font-weight:600; font-size:12.5px; letter-spacing:.06em; color:var(--muted);
+     text-transform:uppercase; border-bottom:1px solid var(--ink); padding:8px 10px}
+  td{padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+  td.n,th.n{text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13.5px}
+  tbody tr:hover{background:var(--soft)}
+  .tick{color:var(--added); font-weight:700}
+  .cross{color:var(--muted)}
+
+  .tag{display:inline-block; font-size:11.5px; padding:1px 7px; border-radius:999px; border:1px solid; line-height:1.7; vertical-align:middle}
+  .tag.inherit{color:var(--inherit); border-color:#d5d9df; background:#f6f7f9}
+  .tag.rework{color:var(--rework); border-color:#ecd9bb; background:#fdf7ed}
+  .tag.added{color:var(--added); border-color:#bfe0da; background:#eef8f6}
+
+  .chips{display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 20px}
+  .chip{font-size:13px; padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink-2)}
+
+  .kanban{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:6px 0 8px}
+  .kanban .col{border:1px solid var(--line); border-radius:11px; background:var(--panel); padding:16px}
+  .kanban .col h4{margin:0 0 10px; font-size:14px; display:flex; align-items:center; gap:8px}
+  .kanban .col ul{margin:0; padding-left:18px; font-size:14px; color:var(--ink-2)}
+  .kanban .col li{margin:4px 0}
+
+  .flow{display:flex; align-items:stretch; gap:10px; flex-wrap:wrap; margin:8px 0 20px}
+  .flow .step{flex:1 1 180px; border:1px solid var(--line); border-radius:9px; padding:12px 14px; background:var(--panel); font-size:14px}
+  .flow .step b{display:block; font-size:12px; letter-spacing:.06em; color:var(--muted); margin-bottom:4px}
+  .flow .arrow{align-self:center; color:var(--muted); font-size:18px}
+
+  .rule{display:grid; grid-template-columns:26px 1fr; gap:12px; margin:0 0 14px}
+  .rule .k{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:var(--accent); padding-top:3px}
+  .rule .v{font-size:15px; color:var(--ink-2); line-height:1.68}
+  .rule .v b{color:var(--ink); font-weight:650}
+
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:8px 0 18px}
+  .split .box{border:1px solid var(--line); border-radius:10px; padding:14px 16px; background:var(--panel)}
+  .split .box h5{margin:0 0 6px; font-size:13px; letter-spacing:.05em; color:var(--muted); text-transform:uppercase}
+  .split .box p{margin:0; font-size:14.5px; color:var(--ink-2)}
+
+  .todo{border:1px dashed #c9cfd8; border-radius:11px; padding:20px 22px; background:repeating-linear-gradient(135deg,#fafbfc,#fafbfc 10px,#f5f7f9 10px,#f5f7f9 20px)}
+
+  footer{padding:40px 0 80px; font-size:13px; color:var(--muted)}
+
+  /* ---------- 第 3 节：规则块 ---------- */
+  .blocks{display:flex; flex-direction:column; gap:2px; margin:6px 0 4px}
+  .blk{display:grid; grid-template-columns:44px 1fr; gap:16px; padding:22px 0; border-top:1px solid var(--line)}
+  .blk:first-child{border-top:1px solid var(--ink)}
+  .blk-n{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:var(--accent); padding-top:4px; letter-spacing:.04em}
+  .blk-b h4{font-size:17.5px; margin:0 0 9px; letter-spacing:-.1px}
+  .blk-b p{margin:0 0 7px; font-size:14.5px; line-height:1.68; color:#5b6472; max-width:760px}
+  .blk-b p:last-child{margin-bottom:0}
+  /* 加粗那句是"要念的"，其余是"被追问时再讲的"——两者的字号与颜色必须拉开 */
+  .blk-b .claim{font-size:16px; line-height:1.66; color:var(--ink); font-weight:650}
+  .blk-b .cost{font-size:13.5px; color:#8a919d; padding-left:0; border-left:2px solid #e6e9ee; padding:1px 0 1px 10px}
+  .blk-b .cost b{color:var(--rework); font-weight:600}
+  .figure{font-size:13.5px; color:var(--muted); margin:-8px 0 24px}
+
+  @media (max-width:1080px){
+    .toc{position:static; width:auto; height:auto; flex-direction:column; border-right:0; border-bottom:1px solid var(--line)}
+    main{margin-left:0}
+    .wrap{padding:0 24px}
+    .g3,.g2,.kanban,.split{grid-template-columns:1fr}
+    header.cover h1{font-size:30px}
+  }
+  @media print{
+    .toc,#bar{display:none}
+    main{margin:0}
+    body{font-size:11pt; background:#fff}
+    section{page-break-inside:auto; padding:22px 0}
+    .blk,.card,.kanban .col{page-break-inside:avoid}
+    .wrap{max-width:none; padding:0 12mm}
+    a{color:inherit; text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+
+<aside class="toc">
+  <div class="brand">AI 行业简报 Agent<span>开源 AI 技术实践 · 期末作业</span></div>
+  <nav id="nav">
+    <a href="#s11"><b>1.1</b>设计理念</a>
+    <a href="#s12"><b>1.2</b>演示 A1</a>
+    <a href="#s13"><b>1.3</b>演示 A2（可跳过）</a>
+    <a href="#s21"><b>2.1</b>准备工作</a>
+    <a href="#s22"><b>2.2</b>消息来源</a>
+    <a href="#s23"><b>2.3</b>骨架 · 证据 · 自检</a>
+    <a href="#s24"><b>2.4</b>界面与交互</a>
+    <a href="#s3"><b>3</b>Skill 的边界与判据</a>
+  </nav>
+  <div class="keys">
+    <kbd>↓</kbd> / <kbd>PgDn</kbd> 下一节　<kbd>↑</kbd> / <kbd>PgUp</kbd> 上一节<br>
+    <kbd>P</kbd> 打印　·　点击左侧目录跳转
+  </div>
+</aside>
+
+<main>
+<div class="wrap">
+
+  <header class="cover">
+    <div class="eyebrow">开源 AI 技术实践 · 期末作品</div>
+    <h1>AI 行业简报 Agent</h1>
+    <p>用一句话要一份能被推翻的行业研判：每条判断都带证据、依赖假设，和"什么情况下你该改主意"。</p>
+    <div class="meta">
+      <span>Agent 骨架继承自课堂 demo5</span>
+      <span>业务层、检索、证据库、自检、档案系统为新增</span>
+      <span>全程 AI 驱动构建</span>
+    </div>
+  </header>
+
+  <!-- ============ 1.1 ============ -->
+  <section id="s11">
+    <div class="head"><span class="num">1.1</span><h2>设计理念</h2></div>
+
+    <p class="big">别人的简报告诉你<em>发生了什么</em>；<br>这一份告诉你<em>凭什么这么判断、什么情况下该改主意</em>。</p>
+
+    <p>面向愿意深究的读者。它不追"最新"，追的是"这条变化值不值得记、凭什么"。三处设计对应三件事：</p>
+
+    <div class="grid g3">
+      <div class="card">
+        <h4>主线 + 证据链</h4>
+        <p>先给结论，再给支撑它的事实。把零散消息收成几条主线，降低理解行业动向的门槛。</p>
+      </div>
+      <div class="card">
+        <h4>依赖假设 + 推翻条件</h4>
+        <p>明确写出这条判断依赖什么前提、哪个信号出现就该改主意。这是辅助判断，也是给自己一个持续关注前沿的抓手。</p>
+      </div>
+      <div class="card">
+        <h4>思考题</h4>
+        <p>引导继续追问、指明往哪里深入，而不是停在"知道了"。</p>
+      </div>
+    </div>
+
+    <h3>同一批事实，三种讲法</h3>
+    <p>非专业 / 学习者 / 业内三个档位，差别不在字数，在术语密度与"要不要用行话省事"。档位在对话里自动推断，也可随时要求重跑。</p>
+
+    <h3>来源</h3>
+    <p>做简报的动机来自《人工智能导论》课程的实验；"辅助判断、引导思考"的导向来自我自己的阅读习惯——真正难的不是知道发生了什么，是知道自己为什么这么想。</p>
+  </section>
+
+  <!-- ============ 1.2 ============ -->
+  <section id="s12">
+    <div class="head"><span class="num">1.2</span><h2>演示 A1：看它长什么样</h2></div>
+
+    <div class="quote"><p><b>演示前先给一句预期：</b>"接下来你会看到它在<strong>搜什么、存了什么、判了什么</strong>。"</p></div>
+
+    <h3>看三处</h3>
+    <div class="flow">
+      <div class="step"><b>顶部徽章</b>当前档案 · 档位 · 覆盖期 · 类型覆盖 · 一手率 · 入选/候选 · 模型</div>
+      <div class="step"><b>左对话 / 右轨迹</b>回答只放正文；工具调用与返回字数在右栏，过程不污染结果</div>
+      <div class="step"><b>下面四页</b>证据 / 账本 / 简报 / 设置，都是可查的数据，不是模型的复述</div>
+    </div>
+
+    <h3>然后启动一次</h3>
+    <p>缺省档：学习者 × 标准 × 7 天，约 5–13 分钟（取决于模型）。运行中会显示阶段条与已运行时长。</p>
+
+    <div class="warn"><p><b>演示注意：</b>运行期间切档案、换会话、删除都会被禁用——切档案会关掉 Agent 的事件循环，等于把这一期腰斩。这是刻意设计的锁，不是卡住了。</p></div>
+  </section>
+
+  <!-- ============ 1.3 ============ -->
+  <section id="s13">
+    <div class="head"><span class="num">1.3</span><h2>演示 A2：看它怎么做<span class="dim" style="font-size:14px;font-weight:400">（时间不足可跳过）</span></h2></div>
+
+    <p>如果时间允许，把右栏轨迹打开，讲三个时刻：</p>
+    <ul>
+      <li><b>检索时</b>：中英双语各一轮，英文是常规动作，不是补救手段。</li>
+      <li><b>入库时</b>：候选被拒的理由会显示——窗口外、域名叫 arXiv、缺日期、跨站转载。</li>
+      <li><b>交付时</b>：先跑机械自检，不通过就不写文件；通过才落盘并记账本。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 2.1 ============ -->
+  <section id="s21">
+    <div class="head"><span class="num">2.1</span><h2>准备工作：先把 demo5 拆开</h2></div>
+
+    <p class="lede">课堂 demo5 是一个课程助教 Agent。骨架能用，业务层全部替换。哪些留、哪些丢，是动手前必须定的事——不定就会一边改一边发现方向不对。</p>
+
+    <div class="kanban">
+      <div class="col">
+        <h4><span class="tag inherit">继承</span></h4>
+        <ul>
+          <li>装配集中在一个函数</li>
+          <li>流式事件归一化</li>
+          <li>双层会话持久化（检查点 / 会话库）</li>
+          <li>虚拟文件系统 + 权限表</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h4><span class="tag rework">改造</span></h4>
+        <ul>
+          <li>工具层换成检索与抓取</li>
+          <li>权限表按档案收窄</li>
+          <li>工作流适配（skill 接进本应用）</li>
+          <li>提示词：行为约束，不写人格</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h4><span class="tag added">新增</span></h4>
+        <ul>
+          <li>证据库（SQLite + MCP 工具）</li>
+          <li>机械自检（11 条规则）</li>
+          <li>运行生命周期与记录</li>
+          <li>验收脚本</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>顺手处理的两件事</h3>
+    <ul>
+      <li><b>历史提交里有误上传的环境变量文件</b>，其中的 key 早已吊销；现在密钥只存在 <code>.env</code>，不进仓库，页面上也只显示前后各几位。</li>
+      <li><b>提前备好两类 key</b>：模型（阿里百炼、DeepSeek）与搜索（DeepSeek、博查、智谱、Tavily）。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 2.2 ============ -->
+  <section id="s22">
+    <div class="head"><span class="num">2.2</span><h2>消息来源：用四个可测的量选，而不是"看着更好"</h2></div>
+
+    <p class="lede">检索源不是随便挑一个。技能要求"任意日期区间 + 每条带日期 + 能拿到一手载体"，这三条都能变成可测指标。</p>
+
+    <table>
+      <thead>
+        <tr><th>供应商</th><th class="n">条数</th><th class="n">延迟</th><th class="n">日期率</th><th class="n">窗口外</th><th class="n">一手</th><th>结论</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>DeepSeek</td><td class="n">20</td><td class="n">476ms</td><td class="n">1.00</td><td class="n">1</td><td class="n">1</td><td><span class="tick">主用</span>：支持任意区间</td></tr>
+        <tr><td>博查</td><td class="n">20</td><td class="n">388ms</td><td class="n">1.00</td><td class="n">0</td><td class="n">0</td><td>中文降级备选</td></tr>
+        <tr><td>智谱</td><td class="n">20</td><td class="n">1266ms</td><td class="n">1.00</td><td class="n">14</td><td class="n">0</td><td><span class="cross">淘汰</span>：窗口写死，20 条里 14 条越界</td></tr>
+        <tr><td>Tavily</td><td class="n">12</td><td class="n">2705ms</td><td class="n">1.00</td><td class="n">0</td><td class="n">0</td><td><span class="cross">淘汰</span>：最慢，结果稀薄</td></tr>
+      </tbody>
+    </table>
+    <p class="dim" style="font-size:13.5px">同一批查询（2 组 × 7 天窗口）实测。「一手」按官方域名 + 发布页路径判定，不看搜索引擎给的权威度。</p>
+
+    <h3>双语检索不是补救，是常规</h3>
+    <p>只搜中文时，一手率被锁在 <strong>5%</strong> 上下（博查为 0）：OpenAI、Anthropic、Meta、NVIDIA 的一手载体只有英文页，中文报道必然是二手编译。同一批查询加上英文检索与语言限定后，能到 <strong>15%</strong>（细分数见 3 的数据卡）。</p>
+
+    <h3>探针顺带查出的三个事实（比选型更重要）</h3>
+    <div class="rule"><div class="k">01</div><div class="v"><b>时间过滤是软的。</b>给了窗口仍约有 5% 越界——入库时得自己再判一次日期，不能信检索参数。</div></div>
+    <div class="rule"><div class="k">02</div><div class="v"><b>重复率 10–15%，且是跨站转载。</b>同一篇稿子会同时出现在网易、新浪、凤凰，只按 URL 去重拦不住。</div></div>
+    <div class="rule"><div class="k">03</div><div class="v"><b>"权威性"不等于一手。</b>新浪财经能拿到最高档权威度，而它只是转载；BAAI 的原文反而更低。</div></div>
+  </section>
+
+  <!-- ============ 2.3 ============ -->
+  <section id="s23">
+    <div class="head"><span class="num">2.3</span><h2>骨架、工具、证据库、自检</h2></div>
+
+    <p class="lede">这一节六个点，都挂在同一句话上——它决定了这个项目和"写一堆提示词"的区别。</p>
+
+    <div class="quote">
+      <p><b>记录外置</b>：不靠模型记忆。<b>交付可检出</b>：不靠模型自觉。<b>规则可执行</b>：不靠模型自查。</p>
+    </div>
+
+    <h3>① 工具返回什么，模型就怎么想</h3>
+    <p>工具没有别的说明书，只有返回结构。三处实测后果：</p>
+    <div class="split">
+      <div class="box"><h5>没有 date 字段</h5><p>模型会自己编一个日期补上。返回里加 <code>date: null</code> 明确表示"没有"，它才会丢弃这条。</p></div>
+      <div class="box"><h5>带 authority 却不说清</h5><p>新浪财经权威度 4、实为转载，会被判成一手。所以工具层只输出按域名与页面性质算出的「是否一手」。</p></div>
+    </div>
+    <div class="split">
+      <div class="box"><h5>降级不吭声</h5><p>中文源失败切博查后，若不告诉模型"这是降级结果"，它会把中文转述当成英文维度的证据。</p></div>
+      <div class="box"><h5>结论</h5><p>工具层做的不是"取数"，是<strong>约束模型能得出什么结论</strong>。返回字段就是它的判断边界。</p></div>
+    </div>
+
+    <h3>② 证据库：三条规则必须由代码执行</h3>
+    <div class="grid g3">
+      <div class="card">
+        <h4>去重要两个键</h4>
+        <p><code>url_norm</code> + <code>title_norm</code>。前者拦同一页面的不同链接，后者拦同一篇稿子的跨站转载。</p>
+      </div>
+      <div class="card">
+        <h4>入库自己判窗口</h4>
+        <p>检索参数是软的（2.2 实测约 5% 越界），所以窗口判定放在入库时做，不靠模型自觉。</p>
+      </div>
+      <div class="card">
+        <h4>一手要三条同时满足</h4>
+        <p>官方域名 + 发布页路径（<code>/blog/</code>、<code>/news/</code>、<code>/pricing</code>）+ 真的抓过正文。</p>
+      </div>
+    </div>
+    <p style="margin-top:14px">为什么要外置：技能里"同一信源只算一票、单信源最多供 2 个簇"是<strong>跨条目统计</strong>。让模型在几十条候选里数谁跟谁同源，必然出错，而且错了没人能发现。</p>
+
+    <h3>③ 自检：把"不该做"变成"做不到"</h3>
+    <p>技能里 24 条自检，18 条有客观答案，做成了 11 条机械规则：字数、条数、术语锚点、簇数与库一致、四要素齐全、事实段措辞、思考题结构、链接可溯源……</p>
+    <div class="quote"><p>最硬的一条：<b>正文里每个链接，必须能在证据库里查到。</b>它把"禁止编造 URL"从道德要求，变成了一次必然失败的检查。</p></div>
+
+    <h3>④ 验收脚本先打脸了写它的人</h3>
+    <p>证据库探针第一轮 <strong>12/13</strong> 通过。错的那一条不是代码，是Agent自己写的断言——心算拒绝条数算错了。</p>
+    <p>这正好说明脚本的意义：它不替模型背书，它替你算一遍。如果只看 Agent 自述"我入库了 3 条"，这个错会一直留着。</p>
+
+    <h3>⑤ 装配集中在一个函数</h3>
+    <p>界面不含任何 Agent 知识，只调 <code>build_agent()</code> 与事件流。改能力只改一个文件，界面永远不用动。</p>
+    <h3 style="margin-top:22px">权限表是顺序敏感的</h3>
+    <div class="flow">
+      <div class="step"><b>1 先放行</b>本档案的简报目录、账本目录</div>
+      <div class="arrow">→</div>
+      <div class="step"><b>2 再挡</b>密钥、虚拟环境、运行时数据、git</div>
+      <div class="arrow">→</div>
+      <div class="step"><b>3 收口</b>工作文档只读，其余一律拒绝写</div>
+    </div>
+    <p class="dim" style="font-size:13.5px">第一条命中即生效。顺序写反会"静默失效"——看起来配了权限，实际一条都没生效。</p>
+
+    <h3>⑥ 运行与记录</h3>
+    <p>一次运行的生命周期曾经挂在页面上：流式循环写在页面函数里，切页面会让整个脚本中断、循环被丢弃；而"写会话记录"那句排在循环之后，于是永远不执行。结果很怪——<strong>运行照常完成、简报照常落盘，聊天记录却只剩提问</strong>。</p>
+    <p>改法：把"一次运行"做成独立对象，它自己跑到底、自己写记录；页面只负责看。配套加了运行中锁（切档案会关掉运行时，所以运行时禁用切换）与 25 分钟墙钟上限。</p>
+    <div class="quote"><p>这条与 ⑤ 的权限表、② 的证据库是同一条原则：<b>关键动作必须由代码持有，不能交给"页面还开着"，也不能交给"模型记得"。</b></p></div>
+  </section>
+
+  <!-- ============ 2.4 ============ -->
+  <section id="s24">
+    <div class="head"><span class="num">2.4</span><h2>界面与交互</h2></div>
+
+    <p class="lede">先按计划做完，再按使用中暴露的问题改。下面每一项都对应一个真实的卡点，不是"顺手加的"。</p>
+
+    <h3>与 demo5 相比改了什么</h3>
+    <div class="chips">
+      <span class="chip">信息徽章</span>
+      <span class="chip">输入框固定在窗口底部</span>
+      <span class="chip">五页分离 + 顶部导航</span>
+      <span class="chip">页内配置环境变量</span>
+      <span class="chip">会话重命名 / 删除</span>
+      <span class="chip">档案系统（隔离历史）</span>
+      <span class="chip">模型可切换</span>
+      <span class="chip">运行时禁用会打断的操作</span>
+    </div>
+
+    <h3>① 输入框钉不钉底，是容器问题不是样式问题</h3>
+    <p>它原来写在左栏的 <code>column</code> 里，就是普通内联元素，跟着内容一起滚。框架只对<strong>主容器里</strong>的输入框做"固定到窗口底部"，移到页面根部就恢复了。看着像 CSS，实际是"元素挂在哪个容器"。</p>
+
+    <h3>② 弹窗不能从弹出菜单里直接打开</h3>
+    <p>在弹窗里点任何控件，整个脚本会重跑一次；此时"弹出菜单"已关闭，弹窗跟着消失。改法：把待办写进会话状态，在主流程里稳定渲染，直到确认或取消才清掉。</p>
+
+    <h3>③ 档案系统：把路径从常量改成参数</h3>
+    <p>原来证据库、会话、账本都是模块级常量。要支持多档案，只能改成"按档案算"的函数。<strong>那两个常量是故意删掉的</strong>——留着的话，漏改一处就会静默写回默认档案，界面上表现为"切了档案但内容没变"；删掉后，漏改的地方会直接报错。</p>
+    <div class="grid g3" style="margin-top:6px">
+      <div class="card"><h4>写权限按档案收窄</h4><p>A 档案读不到，也写不了 B 的目录。</p></div>
+      <div class="card"><h4>记忆分两层</h4><p>全局口径 + 档案偏好。每档案复制一份全局口径，改一条要改 N 份，必然漏。</p></div>
+      <div class="card"><h4>删档案保留简报</h4><p>简报是交付物，不是运行态。</p></div>
+    </div>
+
+    <h3>④ 一处"静默失败"</h3>
+    <p>删档案时，检查点库正被 Agent 打开，文件删不掉；而 <code>ignore_errors=True</code> 把失败吞了——界面显示删除成功，目录还在，重启后又冒出来。改法：先关运行时再删，删不掉就抛错。</p>
+    <div class="quote"><p>它与上面"切页面丢记录"是同一个毛病：<b>没有返回值、没有校验的动作，会安静地什么也没做。</b></p></div>
+
+    <h3>⑤ 密钥与配置的三条</h3>
+    <div class="rule"><div class="k">01</div><div class="v"><b>永不回显。</b>输入框留空，只显示 <code>sk-…a1b2</code>，保存只提交改过的项。</div></div>
+    <div class="rule"><div class="k">02</div><div class="v"><b>改完必须让进程重新读。</b>环境变量加载默认不覆盖已有值，不加 override 就是"界面保存成功、进程里还是旧值"。</div></div>
+    <div class="rule"><div class="k">03</div><div class="v"><b>只查"键在不在"不够。</b>曾把百炼的 key 填成 DeepSeek 的（长度、前缀都像），只有真发一次请求才 401——所以设置页有「测试连通」。</div></div>
+
+    <h3>模型：三个可选，主用 1017 这一版</h3>
+    <table>
+      <thead><tr><th>模型</th><th class="n">用时</th><th class="n">工具</th><th class="n">正文</th><th>交付</th></tr></thead>
+      <tbody>
+        <tr><td><code>deepseek-flash</code><br><span class="dim" style="font-size:12.5px">路由到 v4.1-flash-1017</span></td><td class="n">4:32</td><td class="n">59</td><td class="n">1997 字</td><td><span class="tick">一次交付</span>，簇合并最干净</td></tr>
+        <tr><td><code>qwen3.7-plus</code></td><td class="n">13:02</td><td class="n">49</td><td class="n">1952 字</td><td>第一遍没调交付工具，自动补救后通过</td></tr>
+        <tr><td><code>qwen3.8-max</code></td><td class="n">中止</td><td class="n">46</td><td class="n">—</td><td><span class="cross">没跑完</span>：38 分钟无新事件</td></tr>
+      </tbody>
+    </table>
+    <p><code>deepseek-flash</code> 是接口标识，服务端自动路由到当时最新的 flash 版本，本次全部验证跑在 <strong>v4.1-flash-1017</strong> 上。所以这份成果也可以当作对 1017 的一次测试：同一套工具、同一句提问、五十多次工具调用，它能一次跑完并自己交付。</p>
+    <p class="dim" style="font-size:13.5px">对照不是为了评"谁更聪明"，而是看交付纪律与上下文控制。max 档判完 52 条证据、标了 32 条入选（配额 6–8），采集过猛把上下文撑大，随后卡在一次模型调用上——判据是"无新事件"，不是"感觉慢"。</p>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="s3">
+    <div class="head"><span class="num">3</span><h2>Skill 的边界条件与判断标准</h2></div>
+
+    <p class="big">每条规则背后，都得有<em>一次具体的错误</em>。</p>
+    <p class="lede">这一节不讲怎么写技能文档，讲那些数字和条件是怎么定下来的：定大了会怎样、定小了会怎样、错一次之后改成了什么。</p>
+
+    <div class="blocks">
+
+      <article class="blk">
+        <div class="blk-n">01</div>
+        <div class="blk-b">
+          <h4>配额是算出来的</h4>
+          <p class="claim">1–3 天窗、深度档：簇数 6–8，主线却仍是 3 条 —— 平均每条主线 2.3 簇，而主线的准入门槛就是 2 簇，等于零冗余。</p>
+          <p>配额表里篇幅管主线数、窗口管簇数，两个维度各自独立。窗口一缩，簇数降下来、主线数没动，每条判断就都贴着淘汰线。把 1–3 天档的主线数改为 2 条后，比值回到 3.0–4.0，与 7 天窗持平。</p>
+          <p class="cost"><b>代价</b>：定 3 条，第三条必然靠单簇硬撑；定 1 条，一周里真正有位移的线常有两条，第二条被浪费掉。</p>
+        </div>
+      </article>
+
+      <article class="blk">
+        <div class="blk-n">02</div>
+        <div class="blk-b">
+          <h4>短窗要横向并发</h4>
+          <p class="claim">10-20 那期，治理类在三天内有三个主体各自动作（一家公布内部编制数据、一家累计披露 19 起失控、一家出席市议会听证）。旧规则把它们拆进两条不同主线，新规则识别为同一条线的并发信号。</p>
+          <p>长窗靠"一件事变了几次"补深度；短窗没有纵深，唯一不可替代的是"同一维度多主体在同几天出牌"。这个密度信号必须显式检测（同一事件线独立主体 ≥3 才算），不能指望写的时候自然浮现——不检测就一定漏。</p>
+          <p class="cost"><b>代价</b>：不检测，三条各自独立的事件被平摊进不同判断，密度信号消失；检测过头，把"同趋势不同主体"并成一个簇，违反合并判据。</p>
+        </div>
+      </article>
+
+      <article class="blk">
+        <div class="blk-n">03</div>
+        <div class="blk-b">
+          <h4>什么算值得记</h4>
+          <p class="claim">拿 10-13 那期的 12 条新闻回测，3 条判为无位移（一块 192GB 统一内存、一颗 LPDDR6、一个多模态模型），理由都是"同维度再出牌、分数比平"。</p>
+          <p>判据从"影响多大"换成"有没有发生不可逆的位移"。开源权重收不回来、监管生效改变合法性边界——算；融资能再融、发布会能跳票、榜单下次就被破——不算。用热度和讨论量判断，会被营销词牵着走。</p>
+          <p class="cost"><b>代价</b>：收紧判据会漏掉当时热闹的事——回测的直接结果是条数从 12 降到 7。这是密度的代价，不是失误。</p>
+        </div>
+      </article>
+
+      <article class="blk">
+        <div class="blk-n">04</div>
+        <div class="blk-b">
+          <h4>够格看证据</h4>
+          <p class="claim">一手率只搜中文 5%，加语言限定能到 15%——但真正的区别是它变成了一条规则：一手率低于三分之一时，必须在方法论备注里写明缺口方向。</p>
+          <p>主体清单里国外公司的一手载体只有英文页，中文报道必然是二次编译。不把双语做成常规动作，一手率的天花板就锁死在 5%，而规则又要求写明缺口——一期一期写"本期无一手"，等于把缺陷常态化。</p>
+          <p class="cost"><b>代价</b>：不做，报告永远靠转述；做了但允许"英文失败用中文顶替"，英文维度就是假的，而报告照常写"已做双语检索"。</p>
+        </div>
+      </article>
+
+      <article class="blk">
+        <div class="blk-n">05</div>
+        <div class="blk-b">
+          <h4>承认没拿到</h4>
+          <p class="claim">类型覆盖不足时，头部照实写「类型覆盖 5/6」；窗外事件每期最多 2 条可作边界条目，且不占 48 小时新近配额。</p>
+          <p>静默补齐比缺一维更贵。读者看到六条齐整的简报，会以为各类都在动；看到 5/6，一眼知道缺的是哪一维。边界条目限 2 条，是因为 10-23 那期窗内 7 簇、窗外另有 5–6 条有位移的事件——全放进来就是偷偷扩窗。</p>
+          <p class="cost"><b>代价</b>：不限 2 条，三天简报写成一周边；不写 N/6，读者无从判断这期是否偏科。</p>
+        </div>
+      </article>
+
+      <article class="blk">
+        <div class="blk-n">06</div>
+        <div class="blk-b">
+          <h4>能被下一期打死</h4>
+          <p class="claim">短窗主线的推翻条件，观察窗口必须 ≤ 下一期。写"观察六个月内是否出现 X"的判断，在这套流程里永远无法回检。</p>
+          <p>账本每期回检上期的推翻条件，判成立／已被推翻／仍待验证；另有四条时效规则管"未尘埃落定的事"——7 天内保留、7 天无进展丢弃、7 天有进展重写续期、14 天不再专门搜索。没有时效，账本会积一堆永远待确认的条目，回检成本逐期上升，最后没人读。</p>
+          <p class="cost"><b>代价</b>：不设观察窗口，判断永远"待验证"；不设过期，账本从校准工具退化成备忘录。</p>
+        </div>
+      </article>
+
+      <article class="blk">
+        <div class="blk-n">07</div>
+        <div class="blk-b">
+          <h4>应用打回三条</h4>
+          <p class="claim">装进 Agent 跑五期后，主版本被打回三条：双语是常规动作不是补救、自检要工具化、账本不能跨档案回检。</p>
+          <p>三条都是"用起来才发现"的。最典型的是模型跳步——报告写出来了，没落盘、没跑自检，仍声称已完成；改成一次调用、返回成功标志才有约束力（2.4 的自动补救就是它逼出来的）。另一条是：一手率从 5% 到 15%，只差一个语言维度。</p>
+          <p class="cost"><b>代价</b>：不合并，每个接入方都要重新踩一遍；合并过头，把应用专属的路径与工具名写进主版本，主版本根本执行不了。</p>
+        </div>
+      </article>
+
+    </div>
+
+    <h3>这节用到的数字</h3>
+    <table>
+      <thead><tr><th>项</th><th class="n">值</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>一手率（只搜中文）</td><td class="n">5%</td><td>1/20，7 天窗</td></tr>
+        <tr><td>一手率（加英文）</td><td class="n">10%</td><td>2/20</td></tr>
+        <tr><td>一手率（加语言限定）</td><td class="n">15%</td><td>3/20，命中 NVIDIA 官方博客</td></tr>
+        <tr><td>同一窗口重跑（自检前后）</td><td class="n">2930 → 1940</td><td>字数；术语锚点 1/8 → 7/7</td></tr>
+      </tbody>
+    </table>
+    <p class="figure">前 20 条样本来自同一批查询、同一 7 天窗；自检那一行是同一窗口重跑两次的对照。</p>
+
+    <div class="quote">
+      <p><b>收尾：</b>判断标准的数字一个都没改——改它们得先攒够同档位的测试样本；这次改的是执行方式，因为执行方式能被一次运行直接证伪。</p>
+    </div>
+  </section>
+
+  <footer>
+    页面由 WorkBuddy 生成 · 数据来自本次项目的实测记录（<code>构建流程记录.md</code>）· 不含投资建议
+  </footer>
+
+</div>
+</main>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('#nav a'));
+  var sections = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  var bar = document.getElementById('bar');
+
+  function setActive(id) {
+    links.forEach(function (a) {
+      var on = a.getAttribute('href') === '#' + id;
+      a.classList.toggle('on', on);
+      if (on) { a.setAttribute('aria-current', 'true'); } else { a.removeAttribute('aria-current'); }
+    });
+  }
+
+  // 目录高亮：取"已经进入视口上三分之一"的最后一节
+  var io = new IntersectionObserver(function (entries) {
+    var visible = entries.filter(function (e) { return e.isIntersecting; });
+    if (!visible.length) return;
+    visible.sort(function (a, b) { return a.boundingClientRect.top - b.boundingClientRect.top; });
+    setActive(visible[0].target.id);
+  }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+
+  sections.forEach(function (s) { if (s) io.observe(s); });
+
+  // 进度条
+  function onScroll() {
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    bar.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + '%';
+  }
+  document.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // 键盘：上下/翻页切节，Home/End 首尾，P 打印
+  function currentIndex() {
+    var y = window.scrollY + window.innerHeight * 0.25;
+    var idx = 0;
+    sections.forEach(function (s, i) { if (s && s.offsetTop <= y) idx = i; });
+    return idx;
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'ArrowDown' || k === 'PageDown') {
+      e.preventDefault();
+      var i = Math.min(currentIndex() + 1, sections.length - 1);
+      sections[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (k === 'ArrowUp' || k === 'PageUp') {
+      e.preventDefault();
+      var j = Math.max(currentIndex() - 1, 0);
+      sections[j].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (k === 'Home') {
+      e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (k === 'End') {
+      e.preventDefault(); window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    } else if (k === 'p' || k === 'P') {
+      window.print();
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "brief-store": {
+      "description": "证据库服务：evidence_add / evidence_query / evidence_update / publish_brief。独立进程独占写 runtime/archives/<档案>/store.db；archiveArg 让 builder 追加 --archive <id>",
+      "enabled": true,
+      "archiveArg": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": ["mcp/brief_store.py"]
+    }
+  }
+}

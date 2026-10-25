@@ -21,6 +21,7 @@ build/
 *.log
 tmp_*
 *.tmp
+未完成.txt
 
 # ===== 系统文件 =====
 Thumbs.db
