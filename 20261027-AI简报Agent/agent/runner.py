@@ -15,17 +15,31 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
+from contextlib import aclosing
 from pathlib import Path
 
-from agent.events import stream_events
-from core import history
+from agent.events import RECURSION_LIMIT, stream_events
+from core import config, history
 
 # 跑完的 Run 留一小段，便于界面切回来时能立刻重绘；超出的按时间淘汰。
 _MAX_KEEP = 20
 
 RUNS: dict[str, "Run"] = {}
+
+# 同一次运行里允许的交付尝试次数。撞到就止损，不是"再试一次"。
+#
+# 实测（2026-10-27，深度档）：8 次 publish_brief，正文字数 5476 → 4576 → 4275 →
+# 4328 → 4263 → 4076 → 4049 → 4016（上限 4000），每次都在收敛，但每次重写全文
+# 要花掉上百字输出 + 约 2 个 super-step。第 9 次还没发出就撞了步数上限。
+# 上限设 12 是给"确实能收敛"的情况留余量，不是鼓励试到 12 次。
+PUBLISH_MAX_TRIES = 12
+
+# 违规说明长这样：{"detail": "正文 4016 字，深度档配额 2500–4000 字"}。
+# 引号可能被 repr 成单引号（工具返回有时是 Python 字面量），两种都认。
+_DETAIL = re.compile(r"""["']detail["']\s*:\s*["']([^"']{1,200})["']""")
 
 
 # 补救用的第二轮指令。只在"模型显然写完了报告却没交付"时追加一次。
@@ -71,6 +85,11 @@ class Run:
         self._stream = stream_factory or (
             lambda rt, q, t: stream_events(rt.agent, q, t)
         )
+        # 交付尝试的次数与最后一版正文，用于止损时留稿
+        self.publish_tries = 0
+        self.aborted = False
+        self._last_markdown = ""
+        self._last_violation = ""
 
     # ---- 事件累积（在 Agent 的事件循环线程上执行）
     def _on_event(self, ev: dict) -> None:
@@ -79,27 +98,54 @@ class Run:
             self.text += ev["content"]
         elif kind == "thought":
             return  # 旁白不进正文
-        elif kind in ("tool_call", "tool_result"):
-            if kind == "tool_result" and ev.get("name") == "publish_brief":
+        elif kind == "tool_call":
+            if ev.get("name") == "publish_brief":
+                self._last_markdown = str((ev.get("args") or {}).get("markdown") or "")
+            self.steps.append(ev)
+        elif kind == "tool_result":
+            if ev.get("name") == "publish_brief":
                 body = str(ev.get("content") or "")
                 if "'published': True" in body or '"published": true' in body.lower():
                     self.published = True
+                else:
+                    # 记下第一次违规的 detail：它是止损时唯一能告诉用户的"差在哪"
+                    found = _DETAIL.search(body)
+                    if found and not self._last_violation:
+                        self._last_violation = found.group(1)
+                    self.publish_tries += 1
+                    if self.publish_tries >= PUBLISH_MAX_TRIES:
+                        self.aborted = True
             self.steps.append(ev)
         elif kind == "error":
             self.error = ev["content"]
         elif kind == "answer":
             self.answer = ev["content"]
 
-    def _finish(self) -> None:
-        """无论如何都要落一条助手消息。
+    @staticmethod
+    def _describe(exc: Exception) -> str:
+        """把异常翻成"发生了什么 + 下一步怎么办"。"""
 
-        报错也落：用户切回来时看到"出错了：…"，比看到一片空白有用——
-        空白会让人以为记录又丢了，而报错本身是信息。
+        raw = f"{type(exc).__name__}: {exc}"
+        if "Recursion limit" in raw:
+            return (f"步数用尽（上限 {RECURSION_LIMIT} 步，一次工具调用约吃 2 步）。"
+                    "检索与判定结果都在证据库里，下期可接着用；这一期没有产出文件。"
+                    f"原生信息：{raw}")
+        return raw
+
+    def _finish(self) -> None:
+        """无论如何都要落一条助手消息，**而且异常说明不能被正文淹没**。
+
+        2026-10-27 实测的终止就是这个丢法：`body = answer or text` 拿到的是过程旁白，
+        于是"有正文就不写错误"这条分支把 GraphRecursionError 吃掉了——用户只看到
+        话说到一半就停了，既没有产物，也没有原因。异常不是装饰，是这一轮唯一的结论。
         """
 
-        body = self.answer or self.text
+        body = (self.answer or self.text).strip()
+        if self.error:
+            note = f"运行异常中止：{self.error}"
+            body = f"{body}\n\n---\n**{note}**" if body else note
         if not body:
-            body = f"出错了：{self.error}" if self.error else "（没有生成回答）"
+            body = "（没有生成回答）"
         self.answer = body
         try:
             history.save_message(self.thread_id, "assistant", body, self.steps,
@@ -119,7 +165,7 @@ class Run:
                 mins = int(self.timeout_s // 60)
                 self.error = f"运行超时（{mins} 分钟）已中止。检索与判定结果都还在证据库里，可以下期接着用。"
             except Exception as exc:  # noqa: BLE001
-                self.error = f"{type(exc).__name__}: {exc}"
+                self.error = self._describe(exc)
             finally:
                 self._finish()
 
@@ -134,6 +180,9 @@ class Run:
         """一轮正常流程 + 一次交付补救。超时由外层 asyncio.timeout 管。"""
 
         await self._round(self.question)
+        if self.aborted:
+            self.error = self._abort_note()
+            return
         if not self._needs_retry():
             return
 
@@ -141,6 +190,9 @@ class Run:
         keep = self.answer or self.text
         self.text, self.answer = "", ""
         await self._round(RETRY_PROMPT)
+        if self.aborted:
+            self.error = self._abort_note()
+            return
         # 补救的判据是"有没有交付"，不是"回答有多长"：
         # 模型可能只回一句"已交付：路径"，那是对的；也可能回"无需交付"，那就退回原稿。
         # 用长度判断会把前者误判成后者。
@@ -149,8 +201,42 @@ class Run:
             self.answer = keep
 
     async def _round(self, question: str) -> None:
-        async for ev in self._stream(self.runtime, question, self.thread_id):
-            self._on_event(ev)
+        # 用 aclosing：止损时主动关掉事件流，把图停在检查点上，别让它空转到步数上限
+        async with aclosing(self._stream(self.runtime, question, self.thread_id)) as stream:
+            async for ev in stream:
+                self._on_event(ev)
+                if self.aborted:
+                    return
+
+    def _abort_note(self) -> str:
+        path = self._salvage()
+        tail = f"　最近一次未通过的原因：{self._last_violation}" if self._last_violation else ""
+        return (f"连续 {self.publish_tries} 次调用 publish_brief 都没通过自检，已中止。"
+                f"最后一版正文存成草稿：{path}。{tail}")
+
+    def _salvage(self) -> str:
+        """把没通过自检的最后一版存成草稿。
+
+        为什么必须存：`publish_brief` 的闸门只认"通过"，没通过就当没发生——正文
+        只活在这轮上下文里，进程一停就没了。2026-10-27 那次的正文差 16 字就能过，
+        却只能从会话记录的步骤里捞回来。
+
+        下划线开头：往期简报页按前缀过滤，草稿不会混进"已交付"列表。
+        """
+
+        if not self._last_markdown:
+            return "（没有拿到可存的正文）"
+        try:
+            out = config.briefs_dir(self.archive)
+            out.mkdir(parents=True, exist_ok=True)
+            p = out / f"_未交付-{time.strftime('%Y%m%d-%H%M')}.md"
+            p.write_text(self._last_markdown, encoding="utf-8")
+            try:
+                return str(p.relative_to(config.ROOT))
+            except ValueError:
+                return p.name
+        except Exception as exc:  # noqa: BLE001  存不下来也不该盖掉真正的错误
+            return f"（存草稿失败：{exc}）"
 
     def _needs_retry(self) -> bool:
         """写了长报告、却没交付——补救一次的判据。"""

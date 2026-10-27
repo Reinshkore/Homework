@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from agent import runner  # noqa: E402
 from core import archive, config, history, settings  # noqa: E402
 
 try:
@@ -161,6 +164,201 @@ class TestUi(unittest.TestCase):
             _sh.rmtree(config.briefs_dir(made), ignore_errors=True)
             _sh.rmtree(config.ledger_dir(made), ignore_errors=True)
             archive.set_active(config.DEFAULT_ARCHIVE)
+
+
+@unittest.skipUnless(HAS_APPTEST, "需要 streamlit.testing.v1")
+class TestTraceFold(unittest.TestCase):
+    """执行过程折叠栏：状态存得住、能被侧栏一键收起。
+
+    这两条以前都做不到：
+      - 折叠栏是无状态 expander，任何重跑都按 `expanded=` 初值重建，用户展开的
+        会被打回去；
+      - 运行中用 `st.status`，它的 `update()` 在不传 expanded 时会 ClearField，
+        前端收到的语义是"折叠"——进度每 0.4 秒刷新一次，就等于每 0.4 秒收回一次。
+    """
+
+    def setUp(self):
+        archive.set_active(config.DEFAULT_ARCHIVE)
+        self.db = config.sessions_db(config.DEFAULT_ARCHIVE)
+        self.tid = history.new_thread_id()
+        history.save_message(self.tid, "user", "临时会话·折叠栏", db_path=self.db)
+        history.save_message(
+            self.tid, "assistant", "回答正文", db_path=self.db,
+            steps=[{"type": "tool_call", "name": "web_search", "args": {"q": "x"}},
+                   {"type": "tool_result", "name": "web_search", "chars": 12}],
+        )
+        msgs = history.load_messages(self.tid, self.db)
+        self.mid = next(m["id"] for m in msgs if m["role"] == "assistant")
+        self.key = f"_trace-msg-{self.mid}"
+
+    def tearDown(self):
+        history.delete_session(self.tid, db_path=self.db)
+        os.environ.pop("APP_PAGE", None)
+
+    def _open(self):
+        at = build("chat")
+        at.session_state["threads"] = {config.DEFAULT_ARCHIVE: self.tid}
+        return at.run()
+
+    def _folded(self, at) -> bool:
+        box = next(e for e in at.expander if e.label == "执行过程")
+        return bool(box.proto.expanded)
+
+    def test_state_survives_rerun(self):
+        at = self._open()
+        self.assertFalse(self._folded(at), "默认应为折叠")
+
+        at.session_state[self.key] = True
+        at.run()
+        self.assertTrue(self._folded(at), "重跑后应保持展开")
+
+        at.run()
+        self.assertTrue(self._folded(at), "再重跑一次仍应展开")
+
+    def test_collapse_all_from_sidebar(self):
+        at = self._open()
+        at.session_state[self.key] = True
+        at.run()
+        self.assertTrue(self._folded(at), "先展开，才谈得上收起")
+
+        click(at, "⏬ 全部折叠执行过程")
+        self.assertFalse(self._folded(at), "侧栏一键折叠应把展开的栏收起")
+        self.assertEqual(at.exception, [])
+
+
+@unittest.skipUnless(HAS_APPTEST, "需要 streamlit.testing.v1")
+class TestChatSubmit(unittest.TestCase):
+    """输入框提交这一支：落库 + 启动运行。用桩替代 runner.start，不真跑 Agent。"""
+
+    def setUp(self):
+        archive.set_active(config.DEFAULT_ARCHIVE)
+        self.db = config.sessions_db(config.DEFAULT_ARCHIVE)
+        self.tid = history.new_thread_id()
+        history.save_message(self.tid, "user", "临时会话·提交", db_path=self.db)
+
+    def tearDown(self):
+        history.delete_session(self.tid, db_path=self.db)
+        os.environ.pop("APP_PAGE", None)
+
+    def test_submit_saves_message_and_starts_run(self):
+        from unittest import mock
+
+        at = build("chat")
+        at.session_state["threads"] = {config.DEFAULT_ARCHIVE: self.tid}
+        at.run()
+
+        q = "做一份最近一周的 AI 行业简报"
+        with mock.patch("agent.runner.start") as started:
+            at.chat_input[0].set_value(q).run()
+
+        self.assertEqual(at.exception, [], msg=str(at.exception))
+        self.assertEqual(started.call_count, 1, "提交应只启动一次运行")
+
+        args = started.call_args.args
+        self.assertEqual(args[1], q, "第二个参数是提问原文")
+        self.assertEqual(args[2], self.tid, "第三个参数是当前会话 thread_id")
+        self.assertEqual(args[4], config.DEFAULT_ARCHIVE, "第五个参数是当前档案")
+
+        last = history.load_messages(self.tid, self.db)[-1]
+        self.assertEqual(last["role"], "user")
+        self.assertEqual(last["content"], q, "提问要先落库，再启动运行")
+
+
+class _FakeRun:
+    """够用的假 Run：只实现界面读得到的那几个属性，不碰模型。
+
+    用它是因为"运行中"这条路径没法用真跑验证——一期十几分钟、要花额度。
+    但它是改动风险最大的地方：进度每 0.4 秒刷新一次，任何一次刷新把折叠栏
+    收回都会复现"展开后快速回弹"。
+    """
+
+    def __init__(self, thread_id: str, db: Path, tools: int = 2):
+        self.thread_id = thread_id
+        self.db = db
+        self.question = "假提问：跑一期"
+        self.steps: list[dict] = []
+        self.text = ""
+        self.answer = ""
+        self.error = ""
+        self.started_at = time.monotonic()
+        self.done = threading.Event()
+        self.observed_running = False
+        self._tools = tools
+        self._started = False
+
+    @property
+    def running(self) -> bool:
+        # 界面第一次问"还跑着吗"的时候才开始计时：装配 Agent 要几秒，
+        # 若在构造时就起线程，等界面读到它时早就跑完了，测试会假通过。
+        if not self._started:
+            self._started = True
+            threading.Thread(target=self._tick, daemon=True).start()
+        return not self.done.is_set()
+
+    def calls(self) -> int:
+        # 界面在"未完成"状态下问过次数，就说明运行中的面板确实渲染过
+        if not self.done.is_set():
+            self.observed_running = True
+        return sum(1 for s in self.steps if s["type"] == "tool_call")
+
+    def _tick(self) -> None:
+        for i in range(self._tools):
+            time.sleep(0.5)
+            self.steps.append({"type": "tool_call", "name": f"tool_{i}", "args": {"i": i}})
+        self.answer = "假回答正文"
+        # 真 Run 在这时候自己落库，界面不负责记录——假货也要照做，
+        # 否则跑完 rerun 会走"历史消息"路径却读不到这条消息
+        history.save_message(self.thread_id, "assistant", self.answer, self.steps,
+                             db_path=self.db)
+        self.done.set()
+
+
+@unittest.skipUnless(HAS_APPTEST, "需要 streamlit.testing.v1")
+class TestRunningPanel(unittest.TestCase):
+    """运行中 → 跑完 → 落成历史消息，整条路径不抛异常、且收起来。"""
+
+    def setUp(self):
+        archive.set_active(config.DEFAULT_ARCHIVE)
+        self.db = config.sessions_db(config.DEFAULT_ARCHIVE)
+        self.tid = history.new_thread_id()
+        history.save_message(self.tid, "user", "假提问：跑一期", db_path=self.db)
+
+    def tearDown(self):
+        runner.RUNS.pop(self.tid, None)
+        history.delete_session(self.tid, db_path=self.db)
+        os.environ.pop("APP_PAGE", None)
+
+    def test_running_then_history(self):
+        fake = _FakeRun(self.tid, self.db)
+        runner.RUNS[self.tid] = fake
+
+        at = AppTest.from_file(APP, default_timeout=180)
+        at.session_state["threads"] = {config.DEFAULT_ARCHIVE: self.tid}
+        at.run()
+
+        self.assertEqual(at.exception, [], msg=str(at.exception))
+        self.assertTrue(fake.observed_running,
+                        "运行中的面板没被渲染过——这条测试就没验到东西")
+        self.assertEqual(fake.calls(), 2, "两次工具调用都要进轨迹")
+
+        # 跑完后走历史路径：执行过程应当存在且是折叠的
+        box = next(e for e in at.expander if e.label == "执行过程")
+        self.assertFalse(box.proto.expanded, "跑完应自动折叠，不需要用户滚回顶部")
+
+        body = "\n".join(m.value for m in at.markdown)
+        self.assertIn("假回答正文", body, "正文要落在历史消息里")
+
+    def test_running_panel_has_no_status(self):
+        """回归守卫：运行中的执行过程不能用 st.status。
+
+        `StatusContainer.update()` 在 expanded=None 时会 ClearField("expanded")，
+        前端收到的语义是"折叠"。进度每 0.4 秒刷新一次，就等于每 0.4 秒把用户
+        刚展开的栏打回去——这是"展开后快速回弹"的根因，不是观感问题。
+        """
+
+        src = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertNotIn("st.status(", src,
+                         "运行中的执行过程请用 trace_box：st.status.update() 会清掉 expanded")
 
 
 if __name__ == "__main__":

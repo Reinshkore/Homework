@@ -50,6 +50,11 @@ CARD = ("flex:{flex};min-width:112px;padding:7px 12px;border:1px solid rgba(49,5
 LABEL = "font-size:.72rem;color:#6b7280;line-height:1.5;white-space:nowrap;"
 VALUE = "font-size:1.02rem;font-weight:600;color:#111827;line-height:1.4;white-space:nowrap;"
 
+# 「执行过程」折叠栏的 session_state 键前缀。侧栏的「全部折叠」靠它枚举目标——
+# 只认前缀，不维护清单，免得渲染顺序变了就对不上。
+TRACE_PREFIX = "_trace-"
+TRACE_LIVE = f"{TRACE_PREFIX}live-"
+
 
 # ------------------------------------------------------------------ 档案与运行时
 def _activate(archive_id: str, thread_id: str | None = None) -> None:
@@ -189,6 +194,27 @@ def render_steps(steps: list[dict]) -> None:
             st.code(str(s.get("args"))[:600], language="json")
         elif s["type"] == "tool_result":
             st.caption(f"↩ `{s['name']}` 返回 {s.get('chars') or 0} 字")
+
+
+def trace_box(key: str, default_open: bool = False):
+    """「执行过程」折叠栏：有状态、可被「全部折叠」改写。
+
+    三件事决定了它必须长这样，缺一件就退回旧行为：
+
+    1. **不用 `st.status`。** 它的 `update()` 在 `expanded=None` 时会
+       `ClearField("expanded")`，前端收到的语义是「折叠」。进度刷新每 0.4 秒一次，
+       就等于每 0.4 秒把用户刚点开的栏打回去——实测表现是「展开后快速回弹」。
+    2. **必须带 key + `on_change="rerun"`。** 只有注册成控件，展开状态才活得下来
+       （无状态 expander 每次重跑都按 `expanded=` 初值重建），侧栏也才能从 Python
+       侧改写它。代价是用户点一下会触发一次重跑——运行本身与页面解耦，重跑不掉数据。
+    3. **label 必须恒定。** key、label、expanded 一起参与元素 id 计算，label 里带
+       「N 次工具调用」这种动态计数会让 id 每次都变，状态等于没存。计数放到栏内。
+
+    `expanded=` 固定传 False：元素 id 要稳定，真正的初值来自 session_state。
+    """
+
+    st.session_state.setdefault(key, default_open)
+    return st.expander("执行过程", expanded=False, key=key, on_change="rerun")
 
 
 def card(flex: str, label: str, value: str) -> str:
@@ -385,8 +411,11 @@ def _render_running(run, left, trace_ph) -> None:
     """渲染一次进行中的运行。会阻塞到跑完为止。
 
     阻塞是故意的：Streamlit 要更新界面就得重跑脚本。但它不再承担"记录"的责任——
-    记录由 Run 自己写，所以这里被中断（切页面、关标签）不会丢东西。
+    记录由 Run 自己写，所以这里被中断（切页面、关标签、点折叠栏）不会丢东西。
     再次进来时读的是 Run 里已经累积的 steps/text，接得上前一次。
+
+    「执行过程」用 trace_box 而不是 st.status：见该函数的注释。进度不复用折叠栏的
+    标题（标题是元素 id 的一部分，会动就丢状态），单独放一行在栏外，折叠后也看得见。
     """
 
     with left:
@@ -394,37 +423,50 @@ def _render_running(run, left, trace_ph) -> None:
             st.markdown(run.question)
 
         with st.chat_message("assistant"):
-            status = st.status("思考中……", expanded=True)
+            live = st.empty()      # 进度一行：阶段 + 次数 + 时长，折叠后仍然可见
+            by_phase = st.empty()  # 阶段进度条
+            # 每次运行一个新 key：上一轮展开过，不该让这一轮一开始就是开的
+            box = trace_box(f"{TRACE_LIVE}{run.thread_id}-{int(run.started_at)}",
+                            default_open=True)
             placeholder = st.empty()
-            phase_ph = st.empty()
-            shown = 0
 
-            while True:
-                steps = list(run.steps)
-                for ev in steps[shown:]:
-                    with status:
-                        render_steps([ev])
-                shown = len(steps)
+            with box:
+                count = st.empty()
+                area = st.container()
+                shown = 0
 
-                calls = run.calls()
-                if calls:
-                    i, ph = phase_state(steps)
+                while True:
+                    steps = list(run.steps)
+                    for ev in steps[shown:]:
+                        with area:
+                            render_steps([ev])
+                    shown = len(steps)
+
+                    calls = run.calls()
                     elapsed = int(time.monotonic() - run.started_at)
-                    # 带上时长：卡住时用户能自己判断"是这个慢，还是死了"
-                    status.update(label=f"工作中……{ph}（{calls} 次工具｜{elapsed // 60:02d}:{elapsed % 60:02d}）",
-                                  state="running")
-                    phase_ph.progress(min((i + 1) / len(PHASES), 1.0), text=f"阶段：{ph}")
-                if run.text:
-                    placeholder.markdown(run.text + "▌")
-                trace_ph.markdown(trace_markdown(steps))
+                    if calls:
+                        i, ph = phase_state(steps)
+                        # 带上时长：卡住时用户能自己判断"是这个慢，还是死了"
+                        live.markdown(
+                            f"⏳ 工作中……**{ph}**　{calls} 次工具　"
+                            f"{elapsed // 60:02d}:{elapsed % 60:02d}"
+                        )
+                        by_phase.progress(min((i + 1) / len(PHASES), 1.0), text=f"阶段：{ph}")
+                    else:
+                        live.markdown("⏳ 工作中……")
+                    count.caption(f"工具调用 {calls} 次")
+                    if run.text:
+                        placeholder.markdown(run.text + "▌")
+                    trace_ph.markdown(trace_markdown(steps))
 
-                if run.done.is_set():
-                    break
-                time.sleep(0.4)
+                    if run.done.is_set():
+                        break
+                    time.sleep(0.4)
 
-            calls = run.calls()
-            status.update(label=f"完成（{calls} 次工具调用）" if calls else "完成（未调用工具）",
-                          state="complete", expanded=False)
+                live.markdown(f"✅ 完成（{run.calls()} 次工具调用）" if run.calls()
+                              else "✅ 完成（未调用工具）")
+                count.caption(f"工具调用 {run.calls()} 次")
+                by_phase.empty()
             placeholder.markdown(run.answer or run.text or "（没有生成回答）")
 
     # 跑完重新加载一次，让这条消息走"历史消息"的渲染路径（带步骤折叠）
@@ -454,11 +496,15 @@ def page_chat() -> None:
         history_msgs = MESSAGES[:-1]
 
     with left:
-        for msg in history_msgs:
+        for idx, msg in enumerate(history_msgs):
             with st.chat_message(msg["role"]):
                 if msg.get("steps"):
                     calls = sum(1 for e in msg["steps"] if e["type"] == "tool_call")
-                    with st.expander(f"执行过程（{calls} 次工具调用）", expanded=False):
+                    # 键用消息 id：消息是只增不改的，id 稳定；退化为序号是为了
+                    # 兼容没有 id 的旧返回（序号会随插入位置变动，只在兜底时用）
+                    box = trace_box(f"{TRACE_PREFIX}msg-{msg.get('id', idx)}")
+                    with box:
+                        st.caption(f"工具调用 {calls} 次")
                         render_steps(msg["steps"])
                 st.markdown(msg["content"])
 
@@ -466,6 +512,9 @@ def page_chat() -> None:
     question = st.chat_input("说一句你要什么，例如：做一份最近一周的 AI 行业简报",
                              disabled=running)
     if question:
+        # 上一轮运行留下的 live 键先清掉：新运行是新的 key，旧的只是垃圾
+        for _k in [k for k in st.session_state if k.startswith(TRACE_LIVE)]:
+            del st.session_state[_k]
         history.save_message(THREAD_ID, "user", question, db_path=config.sessions_db(ARCHIVE))
         # 运行一旦开始就自己管自己：落库、报错、收尾都不依赖这个页面还活着
         runner.start(_runtime(), question, THREAD_ID, config.sessions_db(ARCHIVE), ARCHIVE)
@@ -735,6 +784,16 @@ with st.sidebar:
     if st.button("＋ 新会话", type="primary", width="stretch", disabled=BUSY):
         st.session_state["_pending"] = {"kind": "new_session"}
         st.rerun()
+
+    # 执行过程展开后可能有好几屏，收起要走回顶部去点。这里给一个全局出口。
+    # 侧栏先于页面渲染，所以在按钮这一轮里改写 session_state 就能直接生效在
+    # 下面的页面渲染上——不需要再 st.rerun() 一次。
+    _trace_keys = [k for k in st.session_state if k.startswith(TRACE_PREFIX)]
+    if st.button("⏬ 全部折叠执行过程", width="stretch", disabled=not _trace_keys,
+                 help="把对话页所有展开的执行过程收起，不用滚回顶部"
+                      if _trace_keys else "当前没有展开的执行过程"):
+        for _k in _trace_keys:
+            st.session_state[_k] = False
 
     st.divider()
     st.caption("历史会话")

@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -150,8 +151,73 @@ class TestRunner(unittest.TestCase):
         self._wait(run)
         msgs = history.load_messages(self.tid, self.db)
         self.assertEqual(len(msgs), 1)
-        self.assertIn("出错了", msgs[0]["content"])
+        self.assertIn("运行异常中止", msgs[0]["content"])
         self.assertIn("connection reset", msgs[0]["content"])
+
+    def test_error_not_swallowed_by_partial_text(self):
+        """有正文也必须写异常。
+
+        2026-10-27 的终止就是这个丢法：`body = answer or text` 拿到的是过程旁白，
+        "有正文就不写错误"那条分支把 GraphRecursionError 吃掉了。用户看到的是
+        话说到一半停住，既没有产物，也没有原因——比报错更糟。
+        """
+
+        def factory(_runtime, _question, _thread):
+            async def gen():
+                yield {"type": "token", "content": "我先读一下技能定义，再规划后续步骤。"}
+                yield {"type": "tool_call", "name": "publish_brief", "args": {}, "depth": 0}
+                raise RuntimeError("Recursion limit of 300 reached")
+
+            return gen()
+
+        run = runner.start(FakeRuntime(), "q", self.tid, self.db, "default",
+                           stream_factory=factory)
+        self._wait(run)
+        body = history.load_messages(self.tid, self.db)[0]["content"]
+        self.assertIn("我先读一下技能定义", body, "旁白不该被丢掉")
+        self.assertIn("步数用尽", body, "异常必须出现在正文里，且说人话")
+        self.assertIn("Recursion limit", body, "原生信息也要留，便于追")
+
+    def test_abort_after_repeated_publish_failures(self):
+        """交付反复不过就止损，并把最后一版存成草稿。
+
+        实测形态：8 次 publish_brief，字数 5476 → 4016（上限 4000），第 9 次撞步数上限，
+        正文只活在上下文里。止损的意义是"至少留下能接着改的东西"。
+
+        12 次失败必须放在**同一轮**里：`_work` 最多跑两轮（正轮 + 一次补救），
+        按轮次喂事件根本走不到 12 次——第一版测试就是这么写错的。
+        """
+
+        fail = ("{'published': False, 'violations': "
+                "[{'rule': 'L3', 'name': '全文字数', 'severity': 'error', "
+                "'detail': '正文 4016 字，深度档配额 2500–4000 字'}], 'measured': {}}")
+        events: list[dict] = []
+        for i in range(runner.PUBLISH_MAX_TRIES + 3):
+            events.append({"type": "tool_call", "name": "publish_brief", "depth": 0,
+                           "args": {"markdown": f"# 草稿 {i}\n\n正文"}})
+            events.append({"type": "tool_result", "name": "publish_brief",
+                           "content": fail, "chars": 500})
+
+        with mock.patch("agent.runner.config.briefs_dir",
+                        return_value=Path(self.tmp.name) / "briefs"):
+            run = runner.start(FakeRuntime(), "q", self.tid, self.db, "default",
+                               stream_factory=stream_of(events))
+            self._wait(run)
+
+        self.assertTrue(run.aborted, "应在达到次数上限时止损")
+        self.assertFalse(run.published)
+        self.assertEqual(run.publish_tries, runner.PUBLISH_MAX_TRIES,
+                         f"止损后不该再记次数，上限是 {runner.PUBLISH_MAX_TRIES}")
+
+        body = history.load_messages(self.tid, self.db)[0]["content"]
+        self.assertIn("都没通过自检", body)
+        self.assertIn("4016", body, "要告诉人差在哪")
+
+        drafts = list((Path(self.tmp.name) / "briefs").glob("_未交付-*.md"))
+        self.assertEqual(len(drafts), 1, f"应恰好留一份草稿，实际 {drafts}")
+        self.assertIn(f"# 草稿 {runner.PUBLISH_MAX_TRIES - 1}",
+                      drafts[0].read_text(encoding="utf-8"),
+                      "存的应是最后一次提交的那版")
 
     def test_busy_until_finished(self):
         gate = threading.Event()

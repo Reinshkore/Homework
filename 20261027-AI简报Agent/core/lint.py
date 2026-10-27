@@ -42,6 +42,7 @@ NAMED_RULES = {
     "L9": "链接可溯源",
     "L10": "思考题结构",
     "L11": "头部簇数配额",
+    "L12": "退路引用的条目存在",
 }
 
 _HEADER_AUD = re.compile(r"档位：\s*(非专业|学习者|业内)")
@@ -59,6 +60,13 @@ _FORBIDDEN_FACT = re.compile(
     r"(即将|意味着|将会|将于|将在|将成为|将推出|将发布|将上线|将实现|将带来|将提升|将下降|将取代|将面临)"
 )
 _INQUIRY_TYPE = re.compile(r"\*\*(校验型|外推型|反证型)\*\*")
+
+# 「本期思考」整节。退路判据只在这一节里查——正文别处出现的「第 N 条」不算。
+_INQUIRY_SEC = re.compile(r"^#+\s*本期思考(.*?)(?=^#+\s|\Z)", re.S | re.M)
+# 编号条目：`4. **非专业档**　<问题>`。标签是稳定标识，序号随档位变。
+_INQUIRY_ITEM = re.compile(r"^\s*(\d+)\.\s*\*\*([^*\n]{1,12})\*\*", re.M)
+_REF_BY_NUM = re.compile(r"见(?:下)?第\s*(\d+)\s*条")
+_REF_BY_TAG = re.compile(r"见(?:下方)?[「『]?([\u4e00-\u9fff]{2,6}档)[」』]?(?:那一条|那条)")
 
 
 def _quota(length: str, window_days: int) -> dict:
@@ -108,8 +116,13 @@ def lint(markdown: str, audience: str, length: str, window_days: int,
     chars = len(_CJK.findall(text))
     lo, hi = q["chars"]
     if not lo <= chars <= hi:
-        bad("L3", f"正文 {chars} 字，{length}档配额 {lo}–{hi} 字"
-                  + ("，需压缩" if chars > hi else "，偏少"))
+        # 报差额，不报区间。实测模型会自己算减法，但算完只肯删二三百字再试一次——
+        # 2026-10-27 那期从 5476 一路削到 4016，八次都差一点。直接把"还剩多少"给出来。
+        if chars > hi:
+            bad("L3", f"正文 {chars} 字，{length}档配额 {lo}–{hi} 字，"
+                      f"超上限 {chars - hi} 字——一次删够，不要每次只删几十字再提交")
+        else:
+            bad("L3", f"正文 {chars} 字，{length}档配额 {lo}–{hi} 字，还差 {lo - chars} 字")
 
     # ---- L4 事件条数 ----
     events = _blocks(text, _EVENT_HEAD)
@@ -190,6 +203,27 @@ def lint(markdown: str, audience: str, length: str, window_days: int,
         bad("L10", f"主档思考题 {len(main_kinds)} 条，{length}档配额 {lo_i}–{hi_i} 条")
     if main_kinds.count("反证型") != 1:
         bad("L10", f"「反证型」应恰好 1 条，实际 {main_kinds.count('反证型')} 条")
+
+    # ---- L12 退路引用的条目必须存在 ----
+    # 规范允许「按卡住的原因选退路」，但退路指向的条目数随档位变：业内 5 条
+    # （含学习者档、非专业档各 1 条），学习者只有 4 条。2026-10-27 有一期学习者档
+    # 写「见第 5 条」，而那一期只有 4 条——原因不是模型乱编，是参考模板里写死的
+    # 是业内档序号，照抄就指到空气上。这条完全有客观答案，不该靠模型自觉。
+    sec = _INQUIRY_SEC.search(text)
+    if sec:
+        body = sec.group(1)
+        items = {int(m.group(1)): m.group(2).strip() for m in _INQUIRY_ITEM.finditer(body)}
+        for m in _REF_BY_NUM.finditer(body):
+            n = int(m.group(1))
+            if n not in items:
+                bad("L12", f"退路写「见第 {n} 条」，但本期思考只有 {max(items) if items else 0} 条"
+                           f"（编号：{sorted(items)}）——改用标签引用（如「见下方非专业档那条」）")
+        labels = "、".join(items.values())
+        for m in _REF_BY_TAG.finditer(body):
+            tag = m.group(1)
+            if tag not in labels:
+                bad("L12", f"退路写「见{tag}那条」，但本期思考里没有这个标签的条目"
+                           f"（现有：{labels or '无编号条目'}）")
 
     cover_m = _HEADER_COVER.search(text)
     measured = {

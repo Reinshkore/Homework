@@ -143,8 +143,27 @@ class TestEachRule(Base):
         md = make_report().replace("2. **反证型**", "2. **校验型**")
         self.assertIn("L10", self.rules(md))
 
+    def test_L12_dangling_number(self):
+        """退路写「见第 5 条」，但本期只有 3 条——2026-10-27 那期的形态。"""
+
+        md = make_report().replace("见下第 3 条", "见下第 5 条")
+        self.assertIn("L12", self.rules(md))
+
+    def test_L12_dangling_label(self):
+        """用标签引用也一样查：指向本档没有的那一档，同样是空指针。"""
+
+        md = make_report().replace("见下第 3 条", "见下方「学习者档」那条")
+        self.assertIn("L12", self.rules(md))
+
 
 class TestFalsePositives(Base):
+    def test_l12_quiet_when_target_exists(self):
+        """引用存在的条目不该报——误报多了这套检查会被当噪音跳过。"""
+
+        self.assertNotIn("L12", self.rules(make_report()))
+        md = make_report().replace("见下第 3 条", "见下方「非专业档」那条")
+        self.assertNotIn("L12", self.rules(md), "标签存在却报错，是误报")
+
     def test_will_as_ba(self):
         """「将 A 开源」是将=把，已完成的事实，不能当成未来时。"""
         self.assertNotIn("L8", self.rules(make_report()))

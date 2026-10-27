@@ -14,7 +14,14 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
-RECURSION_LIMIT = 160
+# LangGraph 的 super-step 上限。一个工具调用大约吃掉 2 步（模型节点 + 工具节点），
+# 所以这个数约等于"能跑多少次工具调用"。
+#
+# 实测定档（2026-10-27）：深度档一期 64 次工具调用 → step 到 160 被打断，
+# 而当时正文只差 16 字就过线。160 是 demo 留下的默认值，对"检索 + 逐条判定 +
+# 反复交付"这种长任务偏紧，抬到 300（约 130 次调用）。真正的兜底是 runner 的
+# 25 分钟墙钟，不是这个数——它只防死循环，不该变成"活儿干到一半被掐"。
+RECURSION_LIMIT = 300
 
 
 def _iter_messages(update):

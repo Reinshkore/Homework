@@ -98,12 +98,19 @@ def list_sessions(db_path: Path | None = None, limit: int = 60) -> list[dict]:
 
 
 def load_messages(thread_id: str, db_path: Path | None = None) -> list[dict]:
+    """按写入顺序返回消息。
+
+    带 `id` 是为了给界面当控件的稳定键（执行过程折叠栏）：消息只增不改，
+    id 稳定；用序号的话，任何插入都会让状态错位。
+    """
+
     with _conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT role, content, steps FROM messages WHERE thread_id = ? ORDER BY id",
+            "SELECT id, role, content, steps FROM messages WHERE thread_id = ? ORDER BY id",
             (thread_id,),
         ).fetchall()
-    return [{"role": r["role"], "content": r["content"], "steps": json.loads(r["steps"])} for r in rows]
+    return [{"id": r["id"], "role": r["role"], "content": r["content"],
+             "steps": json.loads(r["steps"])} for r in rows]
 
 
 def set_title(thread_id: str, title: str, db_path: Path | None = None) -> None:
