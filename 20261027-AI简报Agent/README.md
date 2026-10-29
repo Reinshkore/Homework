@@ -40,20 +40,37 @@
 
 ## 安装与启动
 
+**虚拟环境不入仓库**（`.venv/` 已忽略），克隆下来先跑一次：
+
 ```bash
-cd 20261027
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-copy .env.example .env          # Git Bash 用 cp
+python scripts/bootstrap.py
 ```
 
-打开 `.env` 填两个必填项（其余可留空）：
+它会建 `.venv`、按 `requirements.lock.txt` 装依赖、把 `.env.example` 复制成 `.env`。
+之后打开 `.env` 填两个必填项（其余可留空）：
 
 ```
 DASHSCOPE_API_KEY=sk-...
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 DEEPSEEK_API_KEY=sk-...
 ```
+
+其他用法：
+
+```bash
+python scripts/bootstrap.py --check   # 只体检：Python 版本 / 依赖是否对得上 / 密钥填了没
+python scripts/bootstrap.py --loose   # 按 requirements.txt 装（换 Python 大版本或换系统时用）
+python scripts/bootstrap.py --index https://mirrors.aliyun.com/pypi/simple/
+```
+
+> **为什么不传 `.venv`**：它是 468 MB、25 257 个文件，而 `.venv/pyvenv.cfg` 里写死了
+> 本机绝对路径（`home = C:\Users\...\python\versions\3.13.12`），换台机器或换个目录都跑不起来。
+> 虚拟环境是生成物，仓库该存的是生成它的配方。
+>
+> **为什么锁版本**：`streamlit` 的 `width="stretch"`、`expander(on_change="rerun")` 都是较新的
+> API；`deepagents` 0.7.24 → 0.7.32 之间 `create_deep_agent` 的可用参数变过。不锁的话，
+> 半年后 `pip install -r requirements.txt` 装出来的东西可能起不来，而报错会出现在很难定位的地方。
+> `requirements.txt` 是 8 个直接依赖（人读），`requirements.lock.txt` 是完整 96 个包（机器读）。
 
 启动：
 
@@ -106,7 +123,9 @@ mcp/brief_store.py     MCP 服务器：证据库与交付工具
 skills/ai-brief/       技能（SKILL.md + references + 报告骨架）
 memory/AGENTS.md       全局长期记忆：路径、口径、禁止项
 memory/archives/<id>.md 档案补充记忆（读者偏好等），与全局口径分开
-scripts/               探针、迁移与验收脚本（见下）
+scripts/               探针、迁移与验收脚本（见下）；bootstrap.py 建环境
+requirements.txt       8 个直接依赖，版本锁定（人读）
+requirements.lock.txt  完整依赖树 96 个包（机器读，用于精确复现）
 tests/                 73 条离线测试
 outputs/briefs/<档案>/ 简报产出
 docs/ledger/<档案>/    判断账本（本地，不进 Git）
@@ -197,7 +216,8 @@ runtime/archives/<档案>/ 证据库、会话、检查点（不进 Git）
 | 现象 | 原因与处理 |
 |---|---|
 | `403 Workspace endpoint access denied`，但 `/models` 能列出 180 个模型 | `.env` 里的 `LLM_BASE_URL` 还留着课程专用 workspace 端点。换成 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| 安装依赖时某个包 403 | 镜像同步问题。换 `-i https://mirrors.aliyun.com/pypi/simple/` |
+| 克隆下来没有 `.venv`，起不来 | 正常，`.venv` 是生成物、不入仓库。跑 `python scripts/bootstrap.py` 重建 |
+| 安装依赖时某个包 403 | 镜像同步问题。`python scripts/bootstrap.py --index https://mirrors.aliyun.com/pypi/simple/` |
 | Qwen 两个模型报 401 `Incorrect API key` | `DASHSCOPE_API_KEY` 不是百炼的 key（常见于把 DeepSeek 的 key 填到了这一项）。到「设置」页重新填，再点「测试连通」 |
 | 改了密钥/模型但没生效 | 保存后会自动重建 Agent。若是手动改了 `.env`，需要重启 `streamlit run`，或到「设置」页点一次保存 |
 | `fixtures/mock.json 还是空的` | `SEARCH_PROVIDER=mock` 但没填快照。改回 `deepseek`，或按文件内说明存一份真实结果 |

@@ -1,16 +1,29 @@
+# 直接依赖。**版本全部锁定**，不是保守，是被咬过：
+#   - streamlit 的 `width="stretch"`、`expander(on_change="rerun")` 都是较新的 API，
+#     跨小版本就可能改名；
+#   - deepagents 0.7.24 → 0.7.32 之间 `create_deep_agent` 的可用参数变过，
+#     升级前必须用 inspect.signature 核一遍（见构建流程记录 M0）。
+#
+# 完整依赖树在 requirements.lock.txt（96 个包），复现环境优先用它。
+# 本文件是「人能读的声明」：说明项目直接依赖谁、验证到哪个版本。
+
 # Deep Agents 核心（内含 langchain / langgraph）
-deepagents>=0.7.24
-# 通过 OpenAI 兼容协议调用阿里百炼
-langchain-openai>=1.7.0
-# 把 MCP 服务器工具转换成 LangChain 工具
-langchain-mcp-adapters>=0.3.2
-# 编写本地 MCP 服务器（FastMCP）
-mcp>=1.30.0
+deepagents==0.7.32
 # 对话检查点持久化（SQLite）
-langgraph-checkpoint-sqlite>=3.0.0
-# 读取 .env
-python-dotenv>=1.0.0
+langgraph-checkpoint-sqlite==3.1.2
+# 把 MCP 服务器工具转换成 LangChain 工具
+langchain-mcp-adapters==0.3.2
+# 通过 OpenAI 兼容协议调用阿里百炼 / DeepSeek
+langchain-openai==1.7.2
+
+# 编写本地 MCP 服务器（FastMCP）
+mcp==1.30.0
+
 # 网页界面
-streamlit>=1.40.0
+streamlit==1.66.1
+
+# 读取 .env
+python-dotenv==1.2.4
+
 # 检索与抓正文的异步 HTTP
-httpx>=0.27.0
+httpx==0.28.1
